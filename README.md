@@ -1,37 +1,202 @@
 # Lungyam (ลุงยาม) 🛡️
 
-![Rust](https://img.shields.io/badge/Rust-Black?style=flat-square&logo=rust&logoColor=white)
-![Edge Native](https://img.shields.io/badge/Deployment-Edge%20Network-blue?style=flat-square)
+![Rust](https://img.shields.io/badge/Rust-2024-black?style=flat-square&logo=rust&logoColor=white)
+![Pingora](https://img.shields.io/badge/Pingora-0.8-blue?style=flat-square)
+![CI](https://img.shields.io/github/actions/workflow/status/phongsathornpt/lungyam/ci.yml?style=flat-square&label=CI)
 ![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)
 
-**Lungyam** is a blazing-fast, edge-native API proxy built with **Rust**. 
+**Lungyam** is a small, configuration-driven API gateway and reverse proxy written in Rust on top of Pingora.
 
-Lungyam (ลุงยาม) คือซอฟต์แวร์ API Proxy ประสิทธิภาพสูงที่ถูกออกแบบมาเพื่อรันบนสภาพแวดล้อม **Edge Network** โดยเฉพาะ ด้วยพลังของภาษา Rust ทำให้ตัวโปรแกรมมีขนาดเล็ก ใช้ทรัพยากรน้อย และตอบสนองต่อ Request ได้ด้วยความหน่วง (Latency) ที่ต่ำที่สุด เหมาะสำหรับการเป็นหน้าด่านให้กับเซิร์ฟเวอร์หลักของคุณ
+ลุงยามถูกออกแบบให้เป็นหน้าด่านของ backend services โดยเน้น latency ต่ำ, resource footprint เล็ก, routing ที่กำหนดด้วย config และ policy ที่ทำงานก่อน/หลัง proxy request.
 
-## ✨ Features
+## Status
 
-* 🚀 **Edge-Optimized:** ออกแบบมาเพื่อทำงานบน Edge nodes, Serverless หรือ Containerized environments ได้อย่างลื่นไหล
-* ⚡ **Blazing Fast Performance:** จัดการทราฟฟิกมหาศาลได้โดยไม่มีปัญหาคอขวด ด้วยการจัดการหน่วยความจำที่ยอดเยี่ยมของ Rust (No Garbage Collection)
-* 🪶 **Minimal Footprint:** ตัวไบนารีมีขนาดเล็ก ประหยัด RAM ทำให้สามารถ Deploy ได้ในพื้นที่ที่มีทรัพยากรจำกัด
-* 🔒 **Secure API Gateway:** ทำหน้าที่เป็นหน้าด่าน (Guard) ในการคัดกรอง Request, จัดการ Rate limiting, และเพิ่มความปลอดภัยก่อนส่งทราฟฟิกไปยัง Backend
-* 🔄 **Flexible Routing:** รองรับการทำ Request/Response transformation และ Dynamic routing ที่ระดับเครือข่ายขอบ (Edge)
+The first native/container MVP is implemented. It currently supports HTTP upstreams and is intended as the foundation for later edge-runtime adapters.
 
-## 🎯 Use Cases
+## Features
 
-* **Edge API Gateway:** กระจายโหลดและจัดการทราฟฟิกใกล้ตัวผู้ใช้ให้มากที่สุด
-* **Security & Filtering:** ใช้ลุงยามเพื่อคัดกรอง Bad requests หรือทำ Payload validation
-* **Offloading Backend:** ลดภาระการทำงานของเซิร์ฟเวอร์หลักด้วยการจัดการ Edge Caching หรือ Authentication ที่ Edge
+- Pingora-based streaming HTTP reverse proxy
+- YAML configuration with startup validation
+- Host, path, and HTTP method routing
+- Explicit route priority and path-specificity ordering
+- Multiple upstream endpoints with round-robin selection
+- Upstream connect/read/write timeouts
+- Request and response header transforms
+- Request IDs propagated to upstreams and responses
+- Structured access logging through the Rust `log` facade
+- Local fixed-window rate limiting
+- `Content-Length` request-size guard
+- Built-in `GET /health` endpoint
+- Docker and Docker Compose examples
+- CI covering formatting, build, unit tests, Clippy, and end-to-end proxy behavior
 
-## 🛠️ Getting Started
+## Architecture
 
-### Prerequisites
-* [Rust toolchain](https://rustup.rs/) (edition 2021 or later)
+```text
+Client
+  |
+  v
+Lungyam / Pingora
+  |
+  +-- health check shortcut
+  +-- route match (host -> path -> method)
+  +-- request size guard
+  +-- local rate limit
+  +-- request header transforms
+  +-- request id / route metadata
+  |
+  v
+Selected upstream endpoint
+  |
+  v
+Backend response
+  |
+  +-- response header transforms
+  +-- request id
+  +-- access log
+  |
+  v
+Client
+```
 
-### Installation
+The Cargo workspace is split into three crates:
 
-Clone the repository and build the project:
+```text
+crates/
+├── lungyam-core/   # configuration/domain model and validation
+├── lungyam-proxy/  # Pingora native data plane
+└── lungyam-cli/    # command-line entry point
+```
+
+## Requirements
+
+- Rust stable with Edition 2024 support
+- `curl` and Python 3 only when running the repository integration test
+- Docker / Docker Compose are optional
+
+## Quick start
 
 ```bash
-git clone [https://github.com/yourusername/lungyam.git](https://github.com/yourusername/lungyam.git)
+git clone https://github.com/phongsathornpt/lungyam.git
 cd lungyam
 cargo build --release
+```
+
+Start a backend on `127.0.0.1:3000`, then run Lungyam:
+
+```bash
+RUST_LOG=info cargo run -p lungyam-cli -- --config config/lungyam.yaml
+```
+
+Check the gateway itself:
+
+```bash
+curl http://127.0.0.1:8080/health
+```
+
+Expected response:
+
+```text
+ok
+```
+
+## Configuration
+
+The default example lives at `config/lungyam.yaml`.
+
+```yaml
+server:
+  listen: 0.0.0.0:8080
+
+upstreams:
+  app:
+    endpoints:
+      - 127.0.0.1:3000
+    connect_timeout_ms: 3000
+    read_timeout_ms: 30000
+    write_timeout_ms: 30000
+
+routes:
+  - name: app
+    host: api.example.com
+    path: /api
+    methods: [GET, POST]
+    upstream: app
+    priority: 100
+    policies:
+      request_headers:
+        remove: [x-remove-me]
+        add:
+          x-lungyam-proxy: lungyam
+      response_headers:
+        add:
+          x-lungyam: edge
+      rate_limit:
+        requests: 100
+        window_seconds: 60
+      max_request_body_bytes: 1048576
+```
+
+A route matches when all configured constraints match. `host` and `methods` are optional. Path matching respects segment boundaries, so `/api` matches `/api` and `/api/users` but not `/apiv2`. Higher `priority` wins; when priorities are equal, the longer path is evaluated first.
+
+Configuration is validated before the server starts. Invalid upstream references, empty upstream pools, duplicate route names, malformed paths, and invalid rate-limit values are rejected.
+
+## Header transforms
+
+Request and response policies can remove headers and then add or replace headers:
+
+```yaml
+policies:
+  request_headers:
+    remove: [x-internal]
+    add:
+      x-proxied-by: lungyam
+  response_headers:
+    add:
+      x-edge: lungyam
+```
+
+Lungyam also adds `x-request-id` to proxied requests and responses and `x-lungyam-route` to proxied requests.
+
+## Run tests
+
+Run the Rust quality checks:
+
+```bash
+cargo fmt --all -- --check
+cargo build --workspace --all-targets
+cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
+
+Run the end-to-end test:
+
+```bash
+bash tests/integration.sh
+```
+
+The integration test starts a fixture backend and verifies method, path, query string, request body, request/response header transforms, request IDs, route matching, health checks, and request-size rejection through a real Lungyam process.
+
+## Docker Compose
+
+A development stack with the integration fixture backend is included:
+
+```bash
+docker compose up --build
+```
+
+Lungyam listens on `http://127.0.0.1:8080` and proxies to the fixture backend service inside the Compose network.
+
+## Current limitations
+
+The MVP intentionally keeps the data plane small:
+
+- Upstream connections are currently plain HTTP; upstream TLS configuration is not exposed yet.
+- Rate limiting is local to one Lungyam process and keyed by route, not client identity.
+- The request-size guard rejects oversized requests when `Content-Length` is present; a streaming byte counter is not implemented yet.
+- Active upstream health checking and automatic failover are not implemented yet.
+- Authentication, distributed rate limiting, caching, WAF rules, and WASM edge adapters are future work.
+
+## License
+
+MIT. See `LICENSE`.
