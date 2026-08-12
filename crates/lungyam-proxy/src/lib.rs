@@ -99,9 +99,10 @@ impl Gateway {
             .rate_limits
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let state = states
-            .entry(route.name.clone())
-            .or_insert(WindowCounter { started: now, count: 0 });
+        let state = states.entry(route.name.clone()).or_insert(WindowCounter {
+            started: now,
+            count: 0,
+        });
 
         if now.duration_since(state.started) >= Duration::from_secs(limit.window_seconds) {
             state.started = now;
@@ -130,11 +131,7 @@ impl ProxyHttp for Gateway {
         }
     }
 
-    async fn request_filter(
-        &self,
-        session: &mut Session,
-        ctx: &mut Self::CTX,
-    ) -> Result<bool> {
+    async fn request_filter(&self, session: &mut Session, ctx: &mut Self::CTX) -> Result<bool> {
         if session.req_header().uri.path() == "/health" {
             session
                 .respond_error_with_body(200, Bytes::from_static(b"ok\n"))
@@ -260,7 +257,7 @@ impl ProxyHttp for Gateway {
 
 fn apply_request_headers(header: &mut RequestHeader, transform: &HeaderTransform) {
     for name in &transform.remove {
-        header.remove_header(name);
+        header.remove_header(name.as_str());
     }
     for (name, value) in &transform.add {
         header
@@ -271,7 +268,7 @@ fn apply_request_headers(header: &mut RequestHeader, transform: &HeaderTransform
 
 fn apply_response_headers(header: &mut ResponseHeader, transform: &HeaderTransform) {
     for name in &transform.remove {
-        header.remove_header(name);
+        header.remove_header(name.as_str());
     }
     for (name, value) in &transform.add {
         header
@@ -347,11 +344,17 @@ mod tests {
 
     #[test]
     fn host_matching_accepts_optional_port() {
-        assert!(host_matches(Some("api.example.com"), Some("api.example.com")));
+        assert!(host_matches(
+            Some("api.example.com"),
+            Some("api.example.com")
+        ));
         assert!(host_matches(
             Some("api.example.com"),
             Some("api.example.com:8080")
         ));
-        assert!(!host_matches(Some("api.example.com"), Some("other.example.com")));
+        assert!(!host_matches(
+            Some("api.example.com"),
+            Some("other.example.com")
+        ));
     }
 }
