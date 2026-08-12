@@ -366,12 +366,12 @@ fn build_upstream_clusters(
     let mut health_services = Vec::with_capacity(config.upstreams.len());
 
     for (name, upstream) in &config.upstreams {
-        let mut cluster = LoadBalancer::try_from_iter(upstream.endpoints.iter().map(String::as_str))
-            .expect("configuration validation guarantees valid upstream endpoints");
+        let mut cluster =
+            LoadBalancer::try_from_iter(upstream.endpoints.iter().map(String::as_str))
+                .expect("configuration validation guarantees valid upstream endpoints");
         cluster.set_health_check(TcpHealthCheck::new());
-        cluster.health_check_frequency = Some(Duration::from_secs(
-            upstream.health_check_interval_seconds,
-        ));
+        cluster.health_check_frequency =
+            Some(Duration::from_secs(upstream.health_check_interval_seconds));
 
         let service_name = format!("upstream {name} health check");
         let health_service = background_service(&service_name, cluster);
