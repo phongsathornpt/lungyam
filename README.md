@@ -19,7 +19,9 @@ The first native/container MVP is implemented. It currently supports HTTP upstre
 - YAML configuration with startup validation
 - Host, path, and HTTP method routing
 - Explicit route priority and path-specificity ordering
-- Multiple upstream endpoints with round-robin selection
+- Multiple upstream endpoints with health-aware round-robin selection
+- Active TCP health checks for upstream pools
+- Bounded connection failover across upstream endpoints
 - Upstream connect/read/write timeouts
 - Request and response header transforms
 - Request IDs propagated to upstreams and responses
@@ -46,7 +48,11 @@ Lungyam / Pingora
   +-- request id / route metadata
   |
   v
-Selected upstream endpoint
+Health-aware upstream pool
+  |
+  +-- TCP health checker
+  +-- round-robin healthy endpoint selection
+  +-- bounded retry on connection failure
   |
   v
 Backend response
@@ -112,9 +118,11 @@ upstreams:
   app:
     endpoints:
       - 127.0.0.1:3000
+      - 127.0.0.1:3001
     connect_timeout_ms: 3000
     read_timeout_ms: 30000
     write_timeout_ms: 30000
+    health_check_interval_seconds: 5
 
 routes:
   - name: app
@@ -139,7 +147,9 @@ routes:
 
 A route matches when all configured constraints match. `host` and `methods` are optional. Path matching respects segment boundaries, so `/api` matches `/api` and `/api/users` but not `/apiv2`. Higher `priority` wins; when priorities are equal, the longer path is evaluated first.
 
-Configuration is validated before the server starts. Invalid upstream references, empty upstream pools, duplicate route names, malformed paths, and invalid rate-limit values are rejected.
+Configuration is validated before the server starts. Invalid upstream references, empty upstream pools, duplicate route names, malformed paths, zero health-check intervals, and invalid rate-limit values are rejected.
+
+Each upstream pool is checked with a TCP health probe. `health_check_interval_seconds` defaults to `5` when omitted. Only healthy endpoints are selected once health state is known. If a selected endpoint still fails during connection establishment, Lungyam marks the connection error retryable while another endpoint remains, preventing an unbounded retry loop.
 
 ## Header transforms
 
@@ -175,7 +185,7 @@ Run the end-to-end test:
 bash tests/integration.sh
 ```
 
-The integration test starts a fixture backend and verifies method, path, query string, request body, request/response header transforms, request IDs, route matching, health checks, and request-size rejection through a real Lungyam process.
+The integration test starts a fixture backend and verifies method, path, query string, request body, request/response header transforms, request IDs, route matching, health-aware upstream failover, health endpoint behavior, and request-size rejection through a real Lungyam process.
 
 ## Docker Compose
 
@@ -194,7 +204,7 @@ The MVP intentionally keeps the data plane small:
 - Upstream connections are currently plain HTTP; upstream TLS configuration is not exposed yet.
 - Rate limiting is local to one Lungyam process and keyed by route, not client identity.
 - The request-size guard rejects oversized requests when `Content-Length` is present; a streaming byte counter is not implemented yet.
-- Active upstream health checking and automatic failover are not implemented yet.
+- Failover currently targets connection-establishment failures; automatic retry on backend HTTP 5xx responses is not enabled.
 - Authentication, distributed rate limiting, caching, WAF rules, and WASM edge adapters are future work.
 
 ## License
