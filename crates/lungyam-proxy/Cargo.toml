@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 async-trait = "0.1"
+bytes = "1"
+log = "0.4"
 lungyam-core = { path = "../lungyam-core" }
 pingora = { version = "0.8.0", features = ["proxy"] }
 

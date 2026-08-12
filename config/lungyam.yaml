@@ -5,6 +5,9 @@ upstreams:
   app:
     endpoints:
       - 127.0.0.1:3000
+    connect_timeout_ms: 3000
+    read_timeout_ms: 30000
+    write_timeout_ms: 30000
 
 routes:
   - name: app

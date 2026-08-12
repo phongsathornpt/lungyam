@@ -11,6 +11,9 @@ name = "lungyam"
 path = "src/main.rs"
 
 [dependencies]
+clap = { version = "4.5", features = ["derive"] }
+env_logger = "0.11"
+lungyam-core = { path = "../lungyam-core" }
 lungyam-proxy = { path = "../lungyam-proxy" }
 
 [lints]

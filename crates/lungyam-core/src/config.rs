@@ -85,6 +85,14 @@ impl Config {
                     route.name
                 )));
             }
+            if let Some(limit) = &route.policies.rate_limit {
+                if limit.requests == 0 || limit.window_seconds == 0 {
+                    return Err(ConfigError::Validation(format!(
+                        "route '{}' rate limit values must be greater than zero",
+                        route.name
+                    )));
+                }
+            }
         }
 
         Ok(())
@@ -101,6 +109,12 @@ pub struct ServerConfig {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct UpstreamConfig {
     pub endpoints: Vec<String>,
+    #[serde(default)]
+    pub connect_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub read_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub write_timeout_ms: Option<u64>,
 }
 
 /// Declarative request route.

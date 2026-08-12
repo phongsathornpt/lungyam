@@ -1,14 +1,24 @@
-use std::env;
+use std::path::PathBuf;
 
+use clap::Parser;
+use lungyam_core::config::Config;
 use lungyam_proxy::{run, runtime_banner};
 
-const DEFAULT_LISTEN: &str = "0.0.0.0:8080";
-const DEFAULT_UPSTREAM: &str = "127.0.0.1:3000";
+#[derive(Debug, Parser)]
+#[command(name = "lungyam", version, about = "Edge-native API proxy")]
+struct Args {
+    /// Path to the Lungyam YAML configuration file.
+    #[arg(short, long, default_value = "config/lungyam.yaml")]
+    config: PathBuf,
+}
 
 fn main() {
-    let listen = env::var("LUNGYAM_LISTEN").unwrap_or_else(|_| DEFAULT_LISTEN.to_owned());
-    let upstream = env::var("LUNGYAM_UPSTREAM").unwrap_or_else(|_| DEFAULT_UPSTREAM.to_owned());
+    env_logger::init();
+    let args = Args::parse();
+    let config = Config::from_path(&args.config).unwrap_or_else(|error| {
+        eprintln!("failed to start {}: {error}", runtime_banner());
+        std::process::exit(2);
+    });
 
-    println!("{} listening on {listen} -> {upstream}", runtime_banner());
-    run(&listen, &upstream);
+    run(config);
 }

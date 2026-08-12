@@ -1,62 +1,330 @@
 //! Native Pingora-based proxy runtime for Lungyam.
 
-use async_trait::async_trait;
-use lungyam_core::PROJECT_NAME;
-use pingora::prelude::*;
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
-/// A minimal proxy that forwards every request to one plain-HTTP upstream.
-#[derive(Debug, Clone)]
-pub struct SingleUpstreamProxy {
-    upstream: String,
+use async_trait::async_trait;
+use bytes::Bytes;
+use lungyam_core::{
+    PROJECT_NAME,
+    config::{Config, HeaderTransform, RouteConfig},
+};
+use pingora::{
+    http::{RequestHeader, ResponseHeader},
+    prelude::*,
+};
+
+/// Per-request state shared by Pingora filters.
+#[derive(Debug)]
+pub struct RequestContext {
+    route_index: Option<usize>,
+    request_id: String,
+    started: Instant,
 }
 
-impl SingleUpstreamProxy {
-    /// Creates a single-upstream proxy policy.
+#[derive(Debug)]
+struct WindowCounter {
+    started: Instant,
+    count: u64,
+}
+
+/// Configuration-driven Lungyam gateway.
+#[derive(Debug)]
+pub struct Gateway {
+    config: Config,
+    round_robin: BTreeMap<String, AtomicUsize>,
+    rate_limits: Mutex<BTreeMap<String, WindowCounter>>,
+    request_sequence: AtomicU64,
+}
+
+impl Gateway {
+    /// Creates a gateway and pre-orders routes by priority and specificity.
     #[must_use]
-    pub fn new(upstream: impl Into<String>) -> Self {
+    pub fn new(mut config: Config) -> Self {
+        config.routes.sort_by(|left, right| {
+            right
+                .priority
+                .cmp(&left.priority)
+                .then_with(|| right.path.len().cmp(&left.path.len()))
+        });
+
+        let round_robin = config
+            .upstreams
+            .keys()
+            .map(|name| (name.clone(), AtomicUsize::new(0)))
+            .collect();
+
         Self {
-            upstream: upstream.into(),
+            config,
+            round_robin,
+            rate_limits: Mutex::new(BTreeMap::new()),
+            request_sequence: AtomicU64::new(1),
         }
     }
 
-    /// Returns the configured upstream address.
-    #[must_use]
-    pub fn upstream(&self) -> &str {
-        &self.upstream
+    fn route_index(&self, session: &Session) -> Option<usize> {
+        let request = session.req_header();
+        let host = request
+            .headers
+            .get("host")
+            .and_then(|value| value.to_str().ok());
+        let path = request.uri.path();
+        let method = request.method.as_str();
+
+        self.config
+            .routes
+            .iter()
+            .position(|route| route_matches(route, host, path, method))
+    }
+
+    fn route<'a>(&'a self, ctx: &RequestContext) -> &'a RouteConfig {
+        &self.config.routes[ctx
+            .route_index
+            .expect("request filter must select a route before proxying")]
+    }
+
+    fn allow_request(&self, route: &RouteConfig) -> bool {
+        let Some(limit) = &route.policies.rate_limit else {
+            return true;
+        };
+
+        let now = Instant::now();
+        let mut states = self
+            .rate_limits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = states
+            .entry(route.name.clone())
+            .or_insert(WindowCounter { started: now, count: 0 });
+
+        if now.duration_since(state.started) >= Duration::from_secs(limit.window_seconds) {
+            state.started = now;
+            state.count = 0;
+        }
+
+        if state.count >= limit.requests {
+            return false;
+        }
+
+        state.count += 1;
+        true
     }
 }
 
 #[async_trait]
-impl ProxyHttp for SingleUpstreamProxy {
-    type CTX = ();
+impl ProxyHttp for Gateway {
+    type CTX = RequestContext;
 
-    fn new_ctx(&self) -> Self::CTX {}
+    fn new_ctx(&self) -> Self::CTX {
+        let sequence = self.request_sequence.fetch_add(1, Ordering::Relaxed);
+        RequestContext {
+            route_index: None,
+            request_id: format!("ly-{sequence}"),
+            started: Instant::now(),
+        }
+    }
+
+    async fn request_filter(
+        &self,
+        session: &mut Session,
+        ctx: &mut Self::CTX,
+    ) -> Result<bool> {
+        if session.req_header().uri.path() == "/health" {
+            session
+                .respond_error_with_body(200, Bytes::from_static(b"ok\n"))
+                .await?;
+            return Ok(true);
+        }
+
+        let Some(route_index) = self.route_index(session) else {
+            session
+                .respond_error_with_body(404, Bytes::from_static(b"route not found\n"))
+                .await?;
+            return Ok(true);
+        };
+        ctx.route_index = Some(route_index);
+
+        let route = self.route(ctx);
+        if let Some(limit) = route.policies.max_request_body_bytes {
+            let content_length = session
+                .req_header()
+                .headers
+                .get("content-length")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<usize>().ok());
+            if content_length.is_some_and(|length| length > limit) {
+                session
+                    .respond_error_with_body(413, Bytes::from_static(b"request body too large\n"))
+                    .await?;
+                return Ok(true);
+            }
+        }
+
+        if !self.allow_request(route) {
+            session
+                .respond_error_with_body(429, Bytes::from_static(b"rate limit exceeded\n"))
+                .await?;
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
 
     async fn upstream_peer(
         &self,
         _session: &mut Session,
-        _ctx: &mut Self::CTX,
+        ctx: &mut Self::CTX,
     ) -> Result<Box<HttpPeer>> {
-        Ok(Box::new(HttpPeer::new(
-            self.upstream.clone(),
-            false,
-            String::new(),
-        )))
+        let route = self.route(ctx);
+        let upstream = self
+            .config
+            .upstreams
+            .get(&route.upstream)
+            .expect("configuration validation guarantees upstream references");
+        let cursor = self
+            .round_robin
+            .get(&route.upstream)
+            .expect("round-robin cursor exists for every upstream");
+        let index = cursor.fetch_add(1, Ordering::Relaxed) % upstream.endpoints.len();
+        let endpoint = upstream.endpoints[index].clone();
+
+        let mut peer = Box::new(HttpPeer::new(endpoint, false, String::new()));
+        peer.options.connection_timeout = upstream.connect_timeout_ms.map(Duration::from_millis);
+        peer.options.read_timeout = upstream.read_timeout_ms.map(Duration::from_millis);
+        peer.options.write_timeout = upstream.write_timeout_ms.map(Duration::from_millis);
+        Ok(peer)
+    }
+
+    async fn upstream_request_filter(
+        &self,
+        _session: &mut Session,
+        upstream_request: &mut RequestHeader,
+        ctx: &mut Self::CTX,
+    ) -> Result<()> {
+        let route = self.route(ctx);
+        apply_request_headers(upstream_request, &route.policies.request_headers);
+        upstream_request
+            .insert_header("x-request-id", ctx.request_id.as_str())
+            .expect("generated request id is a valid header value");
+        upstream_request
+            .insert_header("x-lungyam-route", route.name.as_str())
+            .expect("validated route name is a valid header value");
+        Ok(())
+    }
+
+    async fn response_filter(
+        &self,
+        _session: &mut Session,
+        response: &mut ResponseHeader,
+        ctx: &mut Self::CTX,
+    ) -> Result<()> {
+        let route = self.route(ctx);
+        apply_response_headers(response, &route.policies.response_headers);
+        response
+            .insert_header("x-request-id", ctx.request_id.as_str())
+            .expect("generated request id is a valid header value");
+        response.remove_header("alt-svc");
+        Ok(())
+    }
+
+    async fn logging(
+        &self,
+        session: &mut Session,
+        error: Option<&pingora::Error>,
+        ctx: &mut Self::CTX,
+    ) {
+        let status = session
+            .response_written()
+            .map_or(0, |response| response.status.as_u16());
+        let route = ctx
+            .route_index
+            .map_or("-", |index| self.config.routes[index].name.as_str());
+        log::info!(
+            "request_id={} route={} method={} path={} status={} latency_ms={} error={}",
+            ctx.request_id,
+            route,
+            session.req_header().method,
+            session.req_header().uri,
+            status,
+            ctx.started.elapsed().as_millis(),
+            error.is_some()
+        );
     }
 }
 
+fn apply_request_headers(header: &mut RequestHeader, transform: &HeaderTransform) {
+    for name in &transform.remove {
+        header.remove_header(name);
+    }
+    for (name, value) in &transform.add {
+        header
+            .insert_header(name.as_str(), value.as_str())
+            .expect("configuration header transform must be valid");
+    }
+}
+
+fn apply_response_headers(header: &mut ResponseHeader, transform: &HeaderTransform) {
+    for name in &transform.remove {
+        header.remove_header(name);
+    }
+    for (name, value) in &transform.add {
+        header
+            .insert_header(name.as_str(), value.as_str())
+            .expect("configuration header transform must be valid");
+    }
+}
+
+fn route_matches(route: &RouteConfig, host: Option<&str>, path: &str, method: &str) -> bool {
+    host_matches(route.host.as_deref(), host)
+        && path_matches(&route.path, path)
+        && (route.methods.is_empty()
+            || route
+                .methods
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(method)))
+}
+
+fn host_matches(expected: Option<&str>, actual: Option<&str>) -> bool {
+    let Some(expected) = expected else {
+        return true;
+    };
+    let Some(actual) = actual else {
+        return false;
+    };
+
+    actual.eq_ignore_ascii_case(expected)
+        || actual
+            .strip_prefix(expected)
+            .is_some_and(|suffix| suffix.starts_with(':'))
+}
+
+fn path_matches(route_path: &str, actual: &str) -> bool {
+    if route_path == "/" || route_path == actual {
+        return true;
+    }
+
+    actual
+        .strip_prefix(route_path)
+        .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
 /// Starts the native Lungyam proxy and blocks until the server exits.
-pub fn run(listen: &str, upstream: &str) {
+pub fn run(config: Config) {
+    let listen = config.server.listen.clone();
     let mut server = Server::new(None).expect("failed to create Pingora server");
     server.bootstrap();
 
-    let mut service = http_proxy_service(
-        &server.configuration,
-        SingleUpstreamProxy::new(upstream),
-    );
-    service.add_tcp(listen);
+    let mut service = http_proxy_service(&server.configuration, Gateway::new(config));
+    service.add_tcp(&listen);
     server.add_service(service);
 
+    log::info!("{} listening on {}", runtime_banner(), listen);
     server.run_forever();
 }
 
@@ -68,16 +336,22 @@ pub fn runtime_banner() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{SingleUpstreamProxy, runtime_banner};
+    use super::{host_matches, path_matches};
 
     #[test]
-    fn banner_identifies_proxy_runtime() {
-        assert_eq!(runtime_banner(), "Lungyam proxy");
+    fn path_matching_respects_segment_boundaries() {
+        assert!(path_matches("/api", "/api"));
+        assert!(path_matches("/api", "/api/users"));
+        assert!(!path_matches("/api", "/apiv2"));
     }
 
     #[test]
-    fn proxy_keeps_upstream_address() {
-        let proxy = SingleUpstreamProxy::new("127.0.0.1:3000");
-        assert_eq!(proxy.upstream(), "127.0.0.1:3000");
+    fn host_matching_accepts_optional_port() {
+        assert!(host_matches(Some("api.example.com"), Some("api.example.com")));
+        assert!(host_matches(
+            Some("api.example.com"),
+            Some("api.example.com:8080")
+        ));
+        assert!(!host_matches(Some("api.example.com"), Some("other.example.com")));
     }
 }
