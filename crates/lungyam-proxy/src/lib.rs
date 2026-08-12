@@ -11,6 +11,7 @@ use std::{
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use http::{HeaderName, HeaderValue};
 use lungyam_core::{
     PROJECT_NAME,
     config::{Config, HeaderTransform, RouteConfig},
@@ -260,8 +261,11 @@ fn apply_request_headers(header: &mut RequestHeader, transform: &HeaderTransform
         header.remove_header(name.as_str());
     }
     for (name, value) in &transform.add {
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .expect("configuration header name must be valid");
+        let value = HeaderValue::from_str(value).expect("configuration header value must be valid");
         header
-            .insert_header(name.as_str(), value.as_str())
+            .insert_header(name, value)
             .expect("configuration header transform must be valid");
     }
 }
@@ -271,8 +275,11 @@ fn apply_response_headers(header: &mut ResponseHeader, transform: &HeaderTransfo
         header.remove_header(name.as_str());
     }
     for (name, value) in &transform.add {
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .expect("configuration header name must be valid");
+        let value = HeaderValue::from_str(value).expect("configuration header value must be valid");
         header
-            .insert_header(name.as_str(), value.as_str())
+            .insert_header(name, value)
             .expect("configuration header transform must be valid");
     }
 }
