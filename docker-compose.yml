@@ -1,0 +1,16 @@
+services:
+  lungyam:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config/lungyam.docker.yaml:/etc/lungyam/lungyam.yaml:ro
+    depends_on:
+      - backend
+
+  backend:
+    image: python:3.13-alpine
+    working_dir: /app
+    command: ["python", "backend.py"]
+    volumes:
+      - ./tests/fixtures/backend.py:/app/backend.py:ro

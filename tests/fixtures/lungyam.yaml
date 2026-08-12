@@ -1,0 +1,30 @@
+server:
+  listen: 127.0.0.1:18080
+
+upstreams:
+  fixture:
+    endpoints:
+      - 127.0.0.1:3001
+    connect_timeout_ms: 1000
+    read_timeout_ms: 5000
+    write_timeout_ms: 5000
+
+routes:
+  - name: echo
+    host: api.test
+    path: /echo
+    methods: [POST]
+    upstream: fixture
+    priority: 100
+    policies:
+      request_headers:
+        remove: [x-remove-me]
+        add:
+          x-added: from-lungyam
+      response_headers:
+        add:
+          x-response-transform: yes
+      rate_limit:
+        requests: 100
+        window_seconds: 60
+      max_request_body_bytes: 64
