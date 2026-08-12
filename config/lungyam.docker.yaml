@@ -1,0 +1,22 @@
+server:
+  listen: 0.0.0.0:8080
+
+upstreams:
+  backend:
+    endpoints:
+      - backend:3001
+    connect_timeout_ms: 3000
+    read_timeout_ms: 30000
+    write_timeout_ms: 30000
+
+routes:
+  - name: backend
+    path: /
+    upstream: backend
+    policies:
+      request_headers:
+        add:
+          x-lungyam-proxy: lungyam
+      response_headers:
+        add:
+          x-lungyam: edge

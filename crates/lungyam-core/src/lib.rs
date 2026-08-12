@@ -1,5 +1,7 @@
 //! Core domain types and policies shared by Lungyam runtimes.
 
+pub mod config;
+
 /// Human-readable project name used by runtime adapters.
 pub const PROJECT_NAME: &str = "Lungyam";
 

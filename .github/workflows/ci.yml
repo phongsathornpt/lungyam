@@ -37,3 +37,6 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Integration test
+        run: bash tests/integration.sh
