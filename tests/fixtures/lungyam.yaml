@@ -4,10 +4,12 @@ server:
 upstreams:
   fixture:
     endpoints:
+      - 127.0.0.1:39999
       - 127.0.0.1:3001
-    connect_timeout_ms: 1000
+    connect_timeout_ms: 150
     read_timeout_ms: 5000
     write_timeout_ms: 5000
+    health_check_interval_seconds: 1
 
 routes:
   - name: echo

@@ -58,6 +58,18 @@ grep -q '^x-lungyam-route=echo$' "$body"
 grep -qi '^x-response-transform: yes' "$headers"
 grep -qi '^x-request-id: ly-' "$headers"
 
+# The fixture pool intentionally contains a closed endpoint. Repeated requests
+# must still succeed through health-based selection and bounded connect retry.
+for attempt in 1 2 3 4; do
+  failover_status=$(curl --silent --show-error \
+    --output /dev/null \
+    --write-out '%{http_code}' \
+    --request POST 'http://127.0.0.1:18080/echo?failover=true' \
+    --header 'Host: api.test' \
+    --data-binary "attempt-$attempt")
+  test "$failover_status" = "200"
+done
+
 not_found=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Host: api.test' \
   http://127.0.0.1:18080/echo)

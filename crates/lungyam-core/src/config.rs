@@ -57,6 +57,11 @@ impl Config {
                     "upstream '{name}' contains an empty endpoint"
                 )));
             }
+            if upstream.health_check_interval_seconds == 0 {
+                return Err(ConfigError::Validation(format!(
+                    "upstream '{name}' health_check_interval_seconds must be greater than zero"
+                )));
+            }
         }
 
         let mut route_names = std::collections::BTreeSet::new();
@@ -115,6 +120,8 @@ pub struct UpstreamConfig {
     pub read_timeout_ms: Option<u64>,
     #[serde(default)]
     pub write_timeout_ms: Option<u64>,
+    #[serde(default = "default_health_check_interval_seconds")]
+    pub health_check_interval_seconds: u64,
 }
 
 /// Declarative request route.
@@ -178,6 +185,10 @@ fn default_route_path() -> String {
     "/".to_owned()
 }
 
+const fn default_health_check_interval_seconds() -> u64 {
+    5
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Config, ConfigError};
@@ -201,6 +212,7 @@ routes:
         let config = Config::from_yaml(VALID).expect("valid configuration");
         assert_eq!(config.server.listen, "0.0.0.0:8080");
         assert_eq!(config.routes[0].upstream, "api");
+        assert_eq!(config.upstreams["api"].health_check_interval_seconds, 5);
     }
 
     #[test]
@@ -214,6 +226,16 @@ routes:
     fn rejects_duplicate_route_names() {
         let invalid = format!("{VALID}\n  - name: api\n    path: /other\n    upstream: api\n");
         let error = Config::from_yaml(&invalid).expect_err("duplicate route name");
+        assert!(matches!(error, ConfigError::Validation(_)));
+    }
+
+    #[test]
+    fn rejects_zero_health_check_interval() {
+        let invalid = VALID.replace(
+            "endpoints:\n      - 127.0.0.1:3000",
+            "endpoints:\n      - 127.0.0.1:3000\n    health_check_interval_seconds: 0",
+        );
+        let error = Config::from_yaml(&invalid).expect_err("invalid health check interval");
         assert!(matches!(error, ConfigError::Validation(_)));
     }
 }

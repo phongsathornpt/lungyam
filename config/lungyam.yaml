@@ -8,6 +8,7 @@ upstreams:
     connect_timeout_ms: 3000
     read_timeout_ms: 30000
     write_timeout_ms: 30000
+    health_check_interval_seconds: 5
 
 routes:
   - name: app
