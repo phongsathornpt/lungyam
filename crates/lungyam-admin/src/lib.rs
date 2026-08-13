@@ -2,7 +2,9 @@
 
 mod revision_views;
 mod route_forms;
+mod route_stage;
 mod route_simulator;
+mod security;
 
 use std::{io, net::TcpListener as StdTcpListener, path::PathBuf, sync::Arc, thread::JoinHandle};
 
@@ -111,6 +113,7 @@ fn build_router(runtime: Arc<RuntimeStatus>, config_path: Option<PathBuf>) -> Ro
         .route("/admin/routes", get(routes_page))
         .route("/admin/routes/new", get(new_route_page))
         .route("/admin/routes/validate", post(validate_route))
+        .route("/admin/routes/stage", post(route_stage::stage_route))
         .route("/admin/routes/simulate", post(simulate_route))
         .route("/admin/revisions", get(revisions_page))
         .route("/admin/fragments/config-diff", get(config_diff_fragment))
