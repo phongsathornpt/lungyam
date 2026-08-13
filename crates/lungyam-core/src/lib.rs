@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod config_diff;
+pub mod lifecycle;
 pub mod revision;
 pub mod revision_state;
 pub mod routing;
