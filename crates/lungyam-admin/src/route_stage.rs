@@ -158,9 +158,7 @@ fn candidate_deleted_config(config: &Config, original_name: &str) -> Result<Conf
     let original_name = original_name.trim();
     let mut candidate = config.clone();
     let original_len = candidate.routes.len();
-    candidate
-        .routes
-        .retain(|route| route.name != original_name);
+    candidate.routes.retain(|route| route.name != original_name);
     if candidate.routes.len() == original_len {
         return Err(format!("route '{original_name}' was not found"));
     }
