@@ -23,56 +23,25 @@
     <input name="operation" type="hidden" value="create">
     <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
     <div class="form-grid">
-      <label class="field">
-        <span>Name</span>
-        <input name="name" type="text" required placeholder="api-v2">
-      </label>
+      <label class="field"><span>Name</span><input name="name" type="text" required placeholder="api-v2"></label>
       <label class="field">
         <span>Upstream</span>
         <select name="upstream" required>
-          {% for upstream in upstreams %}
-          <option value="{{ upstream }}">{{ upstream }}</option>
-          {% endfor %}
+          {% for upstream in upstreams %}<option value="{{ upstream }}">{{ upstream }}</option>{% endfor %}
         </select>
       </label>
-      <label class="field">
-        <span>Host</span>
-        <input name="host" type="text" placeholder="api.example.com">
-        <small>Leave empty to match any host.</small>
-      </label>
-      <label class="field">
-        <span>Path</span>
-        <input name="path" type="text" required value="/">
-      </label>
-      <label class="field">
-        <span>Methods</span>
-        <input name="methods" type="text" placeholder="GET, POST">
-        <small>Comma-separated. Leave empty to match any method.</small>
-      </label>
-      <label class="field">
-        <span>Priority</span>
-        <input name="priority" type="number" value="0">
-      </label>
+      <label class="field"><span>Host</span><input name="host" type="text" placeholder="api.example.com"><small>Leave empty to match any host.</small></label>
+      <label class="field"><span>Path</span><input name="path" type="text" required value="/"></label>
+      <label class="field"><span>Methods</span><input name="methods" type="text" placeholder="GET, POST"><small>Comma-separated. Leave empty to match any method.</small></label>
+      <label class="field"><span>Priority</span><input name="priority" type="number" value="0"></label>
     </div>
 
     <div class="form-section">
-      <div>
-        <p class="eyebrow">Policies</p>
-        <h2>Limits</h2>
-      </div>
+      <div><p class="eyebrow">Policies</p><h2>Limits</h2></div>
       <div class="form-grid form-grid-three">
-        <label class="field">
-          <span>Rate-limit requests</span>
-          <input name="rate_limit_requests" type="number" min="1" placeholder="100">
-        </label>
-        <label class="field">
-          <span>Rate-limit window (seconds)</span>
-          <input name="rate_limit_window_seconds" type="number" min="1" placeholder="60">
-        </label>
-        <label class="field">
-          <span>Max request body (bytes)</span>
-          <input name="max_request_body_bytes" type="number" min="1" placeholder="1048576">
-        </label>
+        <label class="field"><span>Rate-limit requests</span><input name="rate_limit_requests" type="number" min="1" placeholder="100"></label>
+        <label class="field"><span>Rate-limit window (seconds)</span><input name="rate_limit_window_seconds" type="number" min="1" placeholder="60"></label>
+        <label class="field"><span>Max request body (bytes)</span><input name="max_request_body_bytes" type="number" min="1" placeholder="1048576"></label>
       </div>
     </div>
 
@@ -100,4 +69,5 @@
 </section>
 
 {% include "fragments/route-updates.html" %}
+{% include "fragments/upstream-forms.html" %}
 {% endblock %}
