@@ -77,7 +77,7 @@ grep -q '>api.test<' <<<"$routes_body"
 grep -q '>POST<' <<<"$routes_body"
 grep -q '>/echo<' <<<"$routes_body"
 grep -q '>fixture<' <<<"$routes_body"
-grep -q '>64 B<' <<<"$routes_body"
+grep -q 'Body 64 B' <<<"$routes_body"
 
 headers=$(mktemp)
 body=$(mktemp)
