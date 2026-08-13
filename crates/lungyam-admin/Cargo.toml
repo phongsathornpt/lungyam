@@ -1,0 +1,20 @@
+[package]
+name = "lungyam-admin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+askama = "0.16.0"
+axum = "0.8.9"
+log = "0.4"
+lungyam-core = { path = "../lungyam-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

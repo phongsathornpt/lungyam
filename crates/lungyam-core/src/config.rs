@@ -1,6 +1,6 @@
 //! Configuration model and validation for Lungyam.
 
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{collections::BTreeMap, fs, net::SocketAddr, path::Path};
 
 use serde::Deserialize;
 use thiserror::Error;
@@ -9,6 +9,8 @@ use thiserror::Error;
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Config {
     pub server: ServerConfig,
+    #[serde(default)]
+    pub admin: AdminConfig,
     pub upstreams: BTreeMap<String, UpstreamConfig>,
     #[serde(default)]
     pub routes: Vec<RouteConfig>,
@@ -33,6 +35,17 @@ impl Config {
         if self.server.listen.trim().is_empty() {
             return Err(ConfigError::Validation(
                 "server.listen must not be empty".to_owned(),
+            ));
+        }
+
+        if self.admin.listen.trim().is_empty() {
+            return Err(ConfigError::Validation(
+                "admin.listen must not be empty".to_owned(),
+            ));
+        }
+        if self.admin.listen.parse::<SocketAddr>().is_err() {
+            return Err(ConfigError::Validation(
+                "admin.listen must be a valid socket address".to_owned(),
             ));
         }
 
@@ -110,6 +123,24 @@ pub struct ServerConfig {
     pub listen: String,
 }
 
+/// Admin control-plane listener settings.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct AdminConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_admin_listen")]
+    pub listen: String,
+}
+
+impl Default for AdminConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            listen: default_admin_listen(),
+        }
+    }
+}
+
 /// A named pool of backend endpoints.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct UpstreamConfig {
@@ -185,6 +216,10 @@ fn default_route_path() -> String {
     "/".to_owned()
 }
 
+fn default_admin_listen() -> String {
+    "127.0.0.1:9090".to_owned()
+}
+
 const fn default_health_check_interval_seconds() -> u64 {
     5
 }
@@ -211,8 +246,31 @@ routes:
     fn parses_valid_config() {
         let config = Config::from_yaml(VALID).expect("valid configuration");
         assert_eq!(config.server.listen, "0.0.0.0:8080");
+        assert!(!config.admin.enabled);
+        assert_eq!(config.admin.listen, "127.0.0.1:9090");
         assert_eq!(config.routes[0].upstream, "api");
         assert_eq!(config.upstreams["api"].health_check_interval_seconds, 5);
+    }
+
+    #[test]
+    fn accepts_enabled_admin_listener() {
+        let yaml = VALID.replace(
+            "upstreams:",
+            "admin:\n  enabled: true\n  listen: 127.0.0.1:9091\nupstreams:",
+        );
+        let config = Config::from_yaml(&yaml).expect("valid admin configuration");
+        assert!(config.admin.enabled);
+        assert_eq!(config.admin.listen, "127.0.0.1:9091");
+    }
+
+    #[test]
+    fn rejects_invalid_admin_listener() {
+        let yaml = VALID.replace(
+            "upstreams:",
+            "admin:\n  enabled: true\n  listen: not-a-socket\nupstreams:",
+        );
+        let error = Config::from_yaml(&yaml).expect_err("invalid admin listener");
+        assert!(matches!(error, ConfigError::Validation(_)));
     }
 
     #[test]

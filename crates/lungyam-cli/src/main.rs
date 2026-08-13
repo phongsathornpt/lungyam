@@ -20,5 +20,16 @@ fn main() {
         std::process::exit(2);
     });
 
+    let _admin_handle = if config.admin.enabled {
+        Some(
+            lungyam_admin::start(config.clone()).unwrap_or_else(|error| {
+                eprintln!("failed to start Lungyam admin: {error}");
+                std::process::exit(2);
+            }),
+        )
+    } else {
+        None
+    };
+
     run(config);
 }
