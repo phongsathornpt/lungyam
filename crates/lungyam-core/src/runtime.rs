@@ -30,7 +30,7 @@ pub struct RuntimeSnapshot {
 pub struct RuntimeStatus {
     started_at: Instant,
     active_config: ActiveConfigSummary,
-    route_configs: Vec<RouteConfig>,
+    config: Config,
     endpoint_health: RwLock<BTreeMap<(String, String), bool>>,
 }
 
@@ -62,7 +62,7 @@ impl RuntimeStatus {
                 upstream_count: config.upstreams.len(),
                 endpoint_count,
             },
-            route_configs: config.routes.clone(),
+            config: config.clone(),
             endpoint_health: RwLock::new(endpoint_health),
         }
     }
@@ -75,10 +75,16 @@ impl RuntimeStatus {
         states.insert((upstream.to_owned(), endpoint.to_owned()), healthy);
     }
 
+    /// Returns the currently active configuration snapshot.
+    #[must_use]
+    pub fn config(&self) -> Config {
+        self.config.clone()
+    }
+
     /// Returns the currently active route configuration snapshot.
     #[must_use]
     pub fn routes(&self) -> Vec<RouteConfig> {
-        self.route_configs.clone()
+        self.config.routes.clone()
     }
 
     #[must_use]
@@ -128,6 +134,10 @@ mod tests {
                 .iter()
                 .all(|endpoint| endpoint.healthy)
         );
+
+        let active_config = status.config();
+        assert_eq!(active_config.routes.len(), 1);
+        assert_eq!(active_config.upstreams.len(), 1);
 
         let routes = status.routes();
         assert_eq!(routes.len(), 1);

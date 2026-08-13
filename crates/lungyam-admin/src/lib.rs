@@ -1,19 +1,22 @@
 //! Lightweight server-rendered control plane for Lungyam.
 
+mod route_forms;
+
 use std::{io, net::TcpListener as StdTcpListener, sync::Arc, thread::JoinHandle};
 
 use askama::Template;
 use axum::{
-    Router,
+    Form, Router,
     extract::State,
     http::{StatusCode, header},
     response::{Html, IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
 use lungyam_core::{
     config::{Config, RouteConfig},
     runtime::{EndpointHealth, RuntimeStatus},
 };
+use route_forms::RouteForm;
 
 #[derive(Clone)]
 struct AdminState {
@@ -87,6 +90,8 @@ pub fn router_with_status(runtime: Arc<RuntimeStatus>) -> Router {
     Router::new()
         .route("/admin", get(dashboard))
         .route("/admin/routes", get(routes_page))
+        .route("/admin/routes/new", get(new_route_page))
+        .route("/admin/routes/validate", post(validate_route))
         .route("/admin/health", get(health))
         .route(
             "/admin/fragments/upstream-health",
@@ -162,6 +167,20 @@ async fn routes_page(State(state): State<AdminState>) -> Response {
     )
 }
 
+async fn new_route_page(State(state): State<AdminState>) -> Response {
+    render_html_result(
+        route_forms::render_new_route(&state.runtime.config()),
+        "new route form",
+    )
+}
+
+async fn validate_route(State(state): State<AdminState>, Form(form): Form<RouteForm>) -> Response {
+    render_html_result(
+        route_forms::render_validation(&state.runtime.config(), form),
+        "route validation",
+    )
+}
+
 async fn upstream_health_fragment(State(state): State<AdminState>) -> Response {
     let snapshot = state.runtime.snapshot();
     render_template(
@@ -191,7 +210,11 @@ async fn htmx_asset() -> impl IntoResponse {
 }
 
 fn render_template(template: &impl Template, label: &str) -> Response {
-    match template.render() {
+    render_html_result(template.render(), label)
+}
+
+fn render_html_result(result: askama::Result<String>, label: &str) -> Response {
+    match result {
         Ok(html) => Html(html).into_response(),
         Err(error) => {
             log::error!("failed to render admin {label}: {error}");
@@ -301,7 +324,7 @@ mod tests {
     use askama::Template;
     use axum::{
         body::Body,
-        http::{Request, StatusCode, header},
+        http::{Method, Request, StatusCode, header},
     };
     use lungyam_core::{
         config::{AdminConfig, Config, RouteConfig, RoutePolicies, ServerConfig, UpstreamConfig},
@@ -364,6 +387,7 @@ mod tests {
         assert!(html.contains("/api"));
         assert!(html.contains("api"));
         assert!(html.contains("1 MiB"));
+        assert!(html.contains("/admin/routes/new"));
     }
 
     #[test]
@@ -459,6 +483,50 @@ mod tests {
                 .await
                 .expect("routes response");
             assert_eq!(routes.status(), StatusCode::OK);
+
+            let new_route = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/admin/routes/new")
+                        .body(Body::empty())
+                        .expect("new route request"),
+                )
+                .await
+                .expect("new route response");
+            assert_eq!(new_route.status(), StatusCode::OK);
+
+            let valid_candidate = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/admin/routes/validate")
+                        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                        .body(Body::from(
+                            "name=new-route&host=&path=%2Fnew&methods=GET%2C+POST&upstream=api&priority=10&rate_limit_requests=10&rate_limit_window_seconds=60&max_request_body_bytes=1024",
+                        ))
+                        .expect("valid route request"),
+                )
+                .await
+                .expect("valid route response");
+            assert_eq!(valid_candidate.status(), StatusCode::OK);
+
+            let invalid_candidate = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/admin/routes/validate")
+                        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                        .body(Body::from(
+                            "name=bad-route&host=&path=missing-slash&methods=&upstream=api&priority=0&rate_limit_requests=&rate_limit_window_seconds=&max_request_body_bytes=",
+                        ))
+                        .expect("invalid route request"),
+                )
+                .await
+                .expect("invalid route response");
+            assert_eq!(invalid_candidate.status(), StatusCode::OK);
 
             let dashboard = app
                 .oneshot(

@@ -7,7 +7,7 @@
     <h1>Routes</h1>
     <p class="muted">Active routes in evaluation order: higher priority first, then more specific paths.</p>
   </div>
-  <span class="status"><span class="status-dot"></span> Read-only</span>
+  <a class="button" href="/admin/routes/new">New route</a>
 </header>
 
 <section class="panel">
@@ -16,7 +16,7 @@
       <p class="eyebrow">Active configuration</p>
       <h2>{{ route_count }} configured routes</h2>
     </div>
-    <span class="muted">Mutation arrives in the next route-management step.</span>
+    <span class="muted">New candidates can be validated now; persistence is intentionally not enabled yet.</span>
   </div>
   <div class="table-wrap">
     <table class="route-table">

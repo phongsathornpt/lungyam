@@ -78,6 +78,48 @@ grep -q '>POST<' <<<"$routes_body"
 grep -q '>/echo<' <<<"$routes_body"
 grep -q '>fixture<' <<<"$routes_body"
 grep -q 'Body 64 B' <<<"$routes_body"
+grep -q 'href="/admin/routes/new"' <<<"$routes_body"
+
+new_route_body=$(curl --silent --fail http://127.0.0.1:19090/admin/routes/new)
+grep -q '>New route<' <<<"$new_route_body"
+grep -q 'hx-post="/admin/routes/validate"' <<<"$new_route_body"
+grep -q 'name="name"' <<<"$new_route_body"
+grep -q 'name="host"' <<<"$new_route_body"
+grep -q 'name="path"' <<<"$new_route_body"
+grep -q 'name="methods"' <<<"$new_route_body"
+grep -q 'name="priority"' <<<"$new_route_body"
+grep -q 'name="upstream"' <<<"$new_route_body"
+grep -q 'value="fixture"' <<<"$new_route_body"
+grep -q 'name="rate_limit_requests"' <<<"$new_route_body"
+grep -q 'name="rate_limit_window_seconds"' <<<"$new_route_body"
+grep -q 'name="max_request_body_bytes"' <<<"$new_route_body"
+grep -q 'Validation only' <<<"$new_route_body"
+
+valid_route=$(curl --silent --fail \
+  --request POST \
+  --header 'content-type: application/x-www-form-urlencoded' \
+  --data 'name=new-route&host=api.test&path=%2Fnew&methods=GET%2C+POST&upstream=fixture&priority=50&rate_limit_requests=10&rate_limit_window_seconds=60&max_request_body_bytes=1024' \
+  http://127.0.0.1:19090/admin/routes/validate)
+grep -q 'Configuration is valid' <<<"$valid_route"
+grep -q 'new-route' <<<"$valid_route"
+grep -q 'Nothing has been persisted' <<<"$valid_route"
+
+invalid_route=$(curl --silent --fail \
+  --request POST \
+  --header 'content-type: application/x-www-form-urlencoded' \
+  --data 'name=bad-route&host=&path=missing-slash&methods=&upstream=fixture&priority=0&rate_limit_requests=&rate_limit_window_seconds=&max_request_body_bytes=' \
+  http://127.0.0.1:19090/admin/routes/validate)
+grep -q 'Route is invalid' <<<"$invalid_route"
+grep -q 'path must start with' <<<"$invalid_route"
+
+duplicate_route=$(curl --silent --fail \
+  --request POST \
+  --header 'content-type: application/x-www-form-urlencoded' \
+  --data 'name=echo&host=api.test&path=%2Fother&methods=POST&upstream=fixture&priority=0&rate_limit_requests=&rate_limit_window_seconds=&max_request_body_bytes=' \
+  http://127.0.0.1:19090/admin/routes/validate)
+grep -q 'Route is invalid' <<<"$duplicate_route"
+grep -q 'duplicate route name' <<<"$duplicate_route"
+grep -q 'echo' <<<"$duplicate_route"
 
 headers=$(mktemp)
 body=$(mktemp)
