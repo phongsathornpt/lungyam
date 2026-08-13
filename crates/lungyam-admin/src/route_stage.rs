@@ -60,6 +60,15 @@ struct UpstreamValidationTemplate {
     message: String,
 }
 
+#[derive(Template)]
+#[template(path = "fragments/upstream-stage.html")]
+struct UpstreamStageTemplate {
+    success: bool,
+    upstream_name: String,
+    revision: String,
+    message: String,
+}
+
 pub(super) async fn stage_route(
     State(state): State<AdminState>,
     Form(form): Form<StageRouteForm>,
@@ -71,47 +80,86 @@ pub(super) async fn stage_route(
         return render_upstream_validation(&config, &form);
     }
 
-    let route_name = form.route.name.trim().to_owned();
+    let subject_name = if operation == "stage-upstream-create" {
+        form.upstream_name.trim().to_owned()
+    } else {
+        form.route.name.trim().to_owned()
+    };
 
     if config.admin.read_only {
-        return render_stage(
-            StatusCode::FORBIDDEN,
-            false,
-            route_name,
-            String::new(),
-            "Admin is configured as read-only.".to_owned(),
+        return render_write_denied(
+            operation,
+            subject_name,
+            "Admin is configured as read-only.",
         );
     }
     if !security::writes_enabled(&config) {
-        return render_stage(
-            StatusCode::FORBIDDEN,
-            false,
-            route_name,
-            String::new(),
-            "Admin writes require a loopback listener until authentication is configured."
-                .to_owned(),
+        return render_write_denied(
+            operation,
+            subject_name,
+            "Admin writes require a loopback listener until authentication is configured.",
         );
     }
     if !security::csrf_token().verify(&form.route.csrf_token) {
-        return render_stage(
-            StatusCode::FORBIDDEN,
-            false,
-            route_name,
-            String::new(),
-            "CSRF token validation failed.".to_owned(),
-        );
+        return render_write_denied(operation, subject_name, "CSRF token validation failed.");
     }
 
     let Some(config_path) = state.config_path.as_ref() else {
-        return render_stage(
-            StatusCode::SERVICE_UNAVAILABLE,
-            false,
-            route_name,
-            String::new(),
-            "Config path is unavailable; staging is disabled for this admin router.".to_owned(),
+        return render_write_denied(
+            operation,
+            subject_name,
+            "Config path is unavailable; staging is disabled for this admin router.",
         );
     };
 
+    if operation == "stage-upstream-create" {
+        let upstream_name = form.upstream_name.trim().to_owned();
+        if !form.upstream_original_name.trim().is_empty() {
+            return render_upstream_stage(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                false,
+                upstream_name,
+                String::new(),
+                "upstream create staging does not accept an existing upstream name".to_owned(),
+            );
+        }
+
+        let candidate = match candidate_upstream_config(&config, &form) {
+            Ok(candidate) => candidate,
+            Err(message) => {
+                return render_upstream_stage(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    false,
+                    upstream_name,
+                    String::new(),
+                    message,
+                );
+            }
+        };
+
+        return match FileConfigLifecycle::new(config_path).stage(
+            &candidate,
+            Some("admin-web".to_owned()),
+            Some(format!("stage upstream create '{upstream_name}'")),
+        ) {
+            Ok(metadata) => render_upstream_stage(
+                StatusCode::OK,
+                true,
+                upstream_name,
+                format!("#{:06}", metadata.revision),
+                String::new(),
+            ),
+            Err(error) => render_upstream_stage(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                false,
+                upstream_name,
+                String::new(),
+                error.to_string(),
+            ),
+        };
+    }
+
+    let route_name = form.route.name.trim().to_owned();
     let candidate = match operation {
         "" | "create" => route_forms::candidate_config(&config, form.route),
         "update" => candidate_updated_config(&config, &form.original_name, form.route),
@@ -120,7 +168,7 @@ pub(super) async fn stage_route(
     let candidate = match candidate {
         Ok(candidate) => candidate,
         Err(message) => {
-            return render_stage(
+            return render_route_stage(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 false,
                 route_name,
@@ -144,14 +192,14 @@ pub(super) async fn stage_route(
         Some("admin-web".to_owned()),
         Some(reason),
     ) {
-        Ok(metadata) => render_stage(
+        Ok(metadata) => render_route_stage(
             StatusCode::OK,
             true,
             route_name,
             format!("#{:06}", metadata.revision),
             String::new(),
         ),
-        Err(error) => render_stage(
+        Err(error) => render_route_stage(
             StatusCode::INTERNAL_SERVER_ERROR,
             false,
             route_name,
@@ -290,7 +338,50 @@ fn candidate_updated_config(
     Ok(candidate)
 }
 
-fn render_stage(
+fn render_write_denied(operation: &str, name: String, message: &str) -> Response {
+    if operation == "stage-upstream-create" {
+        render_upstream_stage(
+            StatusCode::FORBIDDEN,
+            false,
+            name,
+            String::new(),
+            message.to_owned(),
+        )
+    } else {
+        render_route_stage(
+            StatusCode::FORBIDDEN,
+            false,
+            name,
+            String::new(),
+            message.to_owned(),
+        )
+    }
+}
+
+fn render_upstream_stage(
+    status: StatusCode,
+    success: bool,
+    upstream_name: String,
+    revision: String,
+    message: String,
+) -> Response {
+    match (UpstreamStageTemplate {
+        success,
+        upstream_name,
+        revision,
+        message,
+    })
+    .render()
+    {
+        Ok(html) => (status, Html(html)).into_response(),
+        Err(error) => {
+            log::error!("failed to render upstream stage result: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+fn render_route_stage(
     status: StatusCode,
     success: bool,
     route_name: String,
