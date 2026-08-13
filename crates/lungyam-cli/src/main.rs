@@ -1,9 +1,8 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser;
-use lungyam_admin::RuntimeStatus;
-use lungyam_core::config::Config;
-use lungyam_proxy::{run, runtime_banner};
+use lungyam_core::{config::Config, runtime::RuntimeStatus};
+use lungyam_proxy::{run_with_status, runtime_banner};
 
 #[derive(Debug, Parser)]
 #[command(name = "lungyam", version, about = "Edge-native API proxy")]
@@ -24,16 +23,15 @@ fn main() {
 
     let _admin_handle = if config.admin.enabled {
         Some(
-            lungyam_admin::start_with_status(config.clone(), runtime_status).unwrap_or_else(
-                |error| {
+            lungyam_admin::start_with_status(config.clone(), Arc::clone(&runtime_status))
+                .unwrap_or_else(|error| {
                     eprintln!("failed to start Lungyam admin: {error}");
                     std::process::exit(2);
-                },
-            ),
+                }),
         )
     } else {
         None
     };
 
-    run(config);
+    run_with_status(config, runtime_status);
 }
