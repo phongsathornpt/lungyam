@@ -24,7 +24,7 @@ jobs:
 
       - name: Commit vendored asset
         run: |
-          if git diff --quiet -- crates/lungyam-admin/vendor/htmx.min.js; then
+          if [[ -z "$(git status --porcelain -- crates/lungyam-admin/vendor/htmx.min.js)" ]]; then
             echo "htmx asset already matches the pinned release"
             exit 0
           fi
