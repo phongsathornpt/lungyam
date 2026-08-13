@@ -95,7 +95,7 @@ pub fn router_with_status(runtime: Arc<RuntimeStatus>) -> Router {
         .route("/admin/routes", get(routes_page))
         .route("/admin/routes/new", get(new_route_page))
         .route("/admin/routes/validate", post(validate_route))
-            .route("/admin/routes/simulate", post(simulate_route))
+        .route("/admin/routes/simulate", post(simulate_route))
         .route("/admin/health", get(health))
         .route(
             "/admin/fragments/upstream-health",
