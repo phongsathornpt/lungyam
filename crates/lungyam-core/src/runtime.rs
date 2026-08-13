@@ -1,8 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    sync::RwLock,
-    time::Instant,
-};
+use std::{collections::BTreeMap, sync::RwLock, time::Instant};
 
 use crate::config::Config;
 
@@ -49,9 +45,10 @@ impl RuntimeStatus {
             .upstreams
             .iter()
             .flat_map(|(upstream_name, upstream)| {
-                upstream.endpoints.iter().map(|endpoint| {
-                    ((upstream_name.clone(), endpoint.clone()), true)
-                })
+                upstream
+                    .endpoints
+                    .iter()
+                    .map(|endpoint| ((upstream_name.clone(), endpoint.clone()), true))
             })
             .collect();
 
@@ -117,7 +114,12 @@ mod tests {
         assert_eq!(initial.active_config.route_count, 1);
         assert_eq!(initial.active_config.upstream_count, 1);
         assert_eq!(initial.active_config.endpoint_count, 2);
-        assert!(initial.endpoint_health.iter().all(|endpoint| endpoint.healthy));
+        assert!(
+            initial
+                .endpoint_health
+                .iter()
+                .all(|endpoint| endpoint.healthy)
+        );
 
         status.set_endpoint_health("api", "127.0.0.1:3001", false);
         let updated = status.snapshot();
