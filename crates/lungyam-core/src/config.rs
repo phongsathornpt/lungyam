@@ -2,6 +2,7 @@
 
 use std::{collections::BTreeMap, fs, net::SocketAddr, path::Path};
 
+use http::{HeaderName, HeaderValue};
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -103,6 +104,8 @@ impl Config {
                     route.name
                 )));
             }
+            validate_header_transform(&route.name, "request", &route.policies.request_headers)?;
+            validate_header_transform(&route.name, "response", &route.policies.response_headers)?;
             if let Some(limit) = &route.policies.rate_limit {
                 if limit.requests == 0 || limit.window_seconds == 0 {
                     return Err(ConfigError::Validation(format!(
@@ -212,6 +215,35 @@ pub enum ConfigError {
     Validation(String),
 }
 
+fn validate_header_transform(
+    route_name: &str,
+    direction: &str,
+    transform: &HeaderTransform,
+) -> Result<(), ConfigError> {
+    for name in &transform.remove {
+        if HeaderName::from_bytes(name.as_bytes()).is_err() {
+            return Err(ConfigError::Validation(format!(
+                "route '{route_name}' {direction} header remove name '{name}' is invalid"
+            )));
+        }
+    }
+
+    for (name, value) in &transform.add {
+        if HeaderName::from_bytes(name.as_bytes()).is_err() {
+            return Err(ConfigError::Validation(format!(
+                "route '{route_name}' {direction} header add name '{name}' is invalid"
+            )));
+        }
+        if value.parse::<HeaderValue>().is_err() {
+            return Err(ConfigError::Validation(format!(
+                "route '{route_name}' {direction} header value for '{name}' is invalid"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 fn default_route_path() -> String {
     "/".to_owned()
 }
@@ -295,5 +327,27 @@ routes:
         );
         let error = Config::from_yaml(&invalid).expect_err("invalid health check interval");
         assert!(matches!(error, ConfigError::Validation(_)));
+    }
+
+    #[test]
+    fn rejects_invalid_header_transform_name() {
+        let invalid = VALID.replace(
+            "    upstream: api",
+            "    upstream: api\n    policies:\n      request_headers:\n        add:\n          'bad header': value",
+        );
+        let error = Config::from_yaml(&invalid).expect_err("invalid header name");
+        assert!(matches!(error, ConfigError::Validation(_)));
+        assert!(error.to_string().contains("header add name"));
+    }
+
+    #[test]
+    fn rejects_invalid_header_transform_value() {
+        let invalid = VALID.replace(
+            "    upstream: api",
+            "    upstream: api\n    policies:\n      response_headers:\n        add:\n          x-test: \"bad\\nvalue\"",
+        );
+        let error = Config::from_yaml(&invalid).expect_err("invalid header value");
+        assert!(matches!(error, ConfigError::Validation(_)));
+        assert!(error.to_string().contains("header value"));
     }
 }
