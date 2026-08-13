@@ -1,0 +1,11 @@
+{% if valid %}
+<div class="validation-card validation-valid">
+  <strong>Configuration is valid.</strong>
+  <span>Route <code>{{ route_name }}</code> can be accepted by the current Lungyam config model. Nothing has been persisted.</span>
+</div>
+{% else %}
+<div class="validation-card validation-invalid">
+  <strong>Route is invalid.</strong>
+  <span>{{ message }}</span>
+</div>
+{% endif %}
