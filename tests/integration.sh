@@ -58,6 +58,17 @@ if [[ "$admin_health_visible" != "true" ]]; then
   exit 1
 fi
 
+grep -q '/admin/assets/htmx.min.js' <<<"$admin_body"
+grep -q 'hx-get="/admin/fragments/upstream-health"' <<<"$admin_body"
+grep -q 'hx-trigger="every 5s"' <<<"$admin_body"
+
+htmx_body=$(curl --silent --fail http://127.0.0.1:19090/admin/assets/htmx.min.js)
+grep -q 'version:"2.0.10"' <<<"$htmx_body"
+
+health_fragment=$(curl --silent --fail http://127.0.0.1:19090/admin/fragments/upstream-health)
+grep -q '127.0.0.1:39999' <<<"$health_fragment"
+grep -q 'health-unhealthy">Unhealthy' <<<"$health_fragment"
+
 headers=$(mktemp)
 body=$(mktemp)
 status=$(curl --silent --show-error \
