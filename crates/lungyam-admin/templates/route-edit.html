@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Routes</p>
+    <h1>Edit route</h1>
+    <p class="muted">Update or remove an active route by staging a pending revision. Nothing on this page changes the running proxy immediately.</p>
+  </div>
+  <a class="button button-secondary" href="/admin/routes">Back to routes</a>
+</header>
+<section class="panel form-panel">
+  <form class="route-form" method="post" action="/admin/routes/stage-update" hx-post="/admin/routes/stage-update" hx-target="#route-validation" hx-swap="innerHTML">
+    <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
+    <input name="original_name" type="hidden" value="{{ original_name }}">
+    <div class="form-grid">
+      <label class="field"><span>Name</span><input name="name" type="text" required value="{{ name }}"></label>
+      <label class="field"><span>Upstream</span><select name="upstream" required>{% for upstream in upstreams %}<option value="{{ upstream.name }}"{% if upstream.selected %} selected{% endif %}>{{ upstream.name }}</option>{% endfor %}</select></label>
+      <label class="field"><span>Host</span><input name="host" type="text" value="{{ host }}" placeholder="api.example.com"><small>Leave empty to match any host.</small></label>
+      <label class="field"><span>Path</span><input name="path" type="text" required value="{{ path }}"></label>
+      <label class="field"><span>Methods</span><input name="methods" type="text" value="{{ methods }}" placeholder="GET, POST"></label>
+      <label class="field"><span>Priority</span><input name="priority" type="number" value="{{ priority }}"></label>
+    </div>
+    <div class="form-section">
+      <div><p class="eyebrow">Headers</p><h2>Request and response transforms</h2></div>
+      <div class="form-grid">
+        <label class="field"><span>Request headers to add</span><textarea name="request_add_headers" rows="4">{{ request_add_headers }}</textarea><small>One <code>name: value</code> pair per line.</small></label>
+        <label class="field"><span>Request headers to remove</span><textarea name="request_remove_headers" rows="4">{{ request_remove_headers }}</textarea><small>Comma-separated or one name per line.</small></label>
+        <label class="field"><span>Response headers to add</span><textarea name="response_add_headers" rows="4">{{ response_add_headers }}</textarea></label>
+        <label class="field"><span>Response headers to remove</span><textarea name="response_remove_headers" rows="4">{{ response_remove_headers }}</textarea></label>
+      </div>
+    </div>
+    <div class="form-section">
+      <div><p class="eyebrow">Policies</p><h2>Limits</h2></div>
+      <div class="form-grid form-grid-three">
+        <label class="field"><span>Rate-limit requests</span><input name="rate_limit_requests" type="number" min="1" value="{{ rate_limit_requests }}"></label>
+        <label class="field"><span>Rate-limit window (seconds)</span><input name="rate_limit_window_seconds" type="number" min="1" value="{{ rate_limit_window_seconds }}"></label>
+        <label class="field"><span>Max request body (bytes)</span><input name="max_request_body_bytes" type="number" min="1" value="{{ max_request_body_bytes }}"></label>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="button button-secondary" type="button" hx-post="/admin/routes/validate-update" hx-include="closest form" hx-target="#route-validation" hx-swap="innerHTML">Validate update</button>
+      {% if writes_enabled %}<button class="button" type="submit">Stage update</button><span class="muted">The active route remains unchanged until the pending revision is reviewed and activated.</span>{% else %}<span class="muted">Admin writes are disabled for this listener.</span>{% endif %}
+    </div>
+  </form>
+  {% if writes_enabled %}
+  <form class="form-actions panel-spaced" method="post" action="/admin/routes/stage-delete" hx-post="/admin/routes/stage-delete" hx-target="#route-validation" hx-swap="innerHTML">
+    <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
+    <input name="name" type="hidden" value="{{ original_name }}">
+    <button class="button button-secondary" type="submit">Stage delete</button>
+    <span class="muted">Deletion is staged as a pending revision; it is not immediate.</span>
+  </form>
+  {% endif %}
+  <div id="route-validation" class="validation-slot" aria-live="polite"><div class="validation-card validation-neutral">Validate the update or stage a change for revision review.</div></div>
+</section>
+{% endblock %}
