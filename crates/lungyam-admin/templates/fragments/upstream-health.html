@@ -1,0 +1,20 @@
+<div class="table-wrap">
+  <table class="health-table">
+    <thead>
+      <tr>
+        <th scope="col">Upstream</th>
+        <th scope="col">Endpoint</th>
+        <th scope="col">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for health in endpoint_health %}
+      <tr>
+        <td>{{ health.upstream }}</td>
+        <td><code>{{ health.endpoint }}</code></td>
+        <td><span class="health-badge {{ health.status_class }}">{{ health.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

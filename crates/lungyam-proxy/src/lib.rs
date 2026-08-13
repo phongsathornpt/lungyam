@@ -15,10 +15,15 @@ use http::{HeaderName, HeaderValue};
 use lungyam_core::{
     PROJECT_NAME,
     config::{Config, HeaderTransform, RouteConfig},
+    runtime::RuntimeStatus,
 };
 use pingora::{
     http::{RequestHeader, ResponseHeader},
-    lb::{LoadBalancer, health_check::TcpHealthCheck, selection::RoundRobin},
+    lb::{
+        Backend, LoadBalancer,
+        health_check::{HealthObserve, TcpHealthCheck},
+        selection::RoundRobin,
+    },
     prelude::*,
     services::background::GenBackgroundService,
 };
@@ -36,6 +41,26 @@ pub struct RequestContext {
 struct WindowCounter {
     started: Instant,
     count: u64,
+}
+
+struct RuntimeHealthObserver {
+    upstream: String,
+    runtime: Arc<RuntimeStatus>,
+}
+
+#[async_trait]
+impl HealthObserve for RuntimeHealthObserver {
+    async fn observe(&self, target: &Backend, healthy: bool) {
+        let endpoint = target.addr.to_string();
+        self.runtime
+            .set_endpoint_health(&self.upstream, &endpoint, healthy);
+        log::info!(
+            "upstream={} endpoint={} healthy={}",
+            self.upstream,
+            endpoint,
+            healthy
+        );
+    }
 }
 
 type UpstreamCluster = Arc<LoadBalancer<RoundRobin>>;
@@ -358,6 +383,7 @@ fn path_matches(route_path: &str, actual: &str) -> bool {
 
 fn build_upstream_clusters(
     config: &Config,
+    runtime: &Arc<RuntimeStatus>,
 ) -> (
     BTreeMap<String, UpstreamCluster>,
     Vec<UpstreamHealthService>,
@@ -369,7 +395,12 @@ fn build_upstream_clusters(
         let mut cluster =
             LoadBalancer::try_from_iter(upstream.endpoints.iter().map(String::as_str))
                 .expect("configuration validation guarantees valid upstream endpoints");
-        cluster.set_health_check(TcpHealthCheck::new());
+        let mut health_check = TcpHealthCheck::new();
+        health_check.health_changed_callback = Some(Box::new(RuntimeHealthObserver {
+            upstream: name.clone(),
+            runtime: Arc::clone(runtime),
+        }));
+        cluster.set_health_check(health_check);
         cluster.health_check_frequency =
             Some(Duration::from_secs(upstream.health_check_interval_seconds));
 
@@ -384,8 +415,14 @@ fn build_upstream_clusters(
 
 /// Starts the native Lungyam proxy and blocks until the server exits.
 pub fn run(config: Config) {
+    let runtime = Arc::new(RuntimeStatus::from_config(&config));
+    run_with_status(config, runtime);
+}
+
+/// Starts the proxy with shared runtime status for control-plane visibility.
+pub fn run_with_status(config: Config, runtime: Arc<RuntimeStatus>) {
     let listen = config.server.listen.clone();
-    let (clusters, health_services) = build_upstream_clusters(&config);
+    let (clusters, health_services) = build_upstream_clusters(&config, &runtime);
     let mut server = Server::new(None).expect("failed to create Pingora server");
     server.bootstrap();
 

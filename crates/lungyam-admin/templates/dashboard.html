@@ -10,7 +10,7 @@
   <span class="status"><span class="status-dot"></span> Running</span>
 </header>
 
-<section class="metrics" aria-label="Configuration summary">
+<section class="metrics" aria-label="Runtime and configuration summary">
   <article class="metric-card">
     <span>Routes</span>
     <strong>{{ route_count }}</strong>
@@ -23,13 +23,17 @@
     <span>Endpoints</span>
     <strong>{{ endpoint_count }}</strong>
   </article>
+  <article class="metric-card">
+    <span>Uptime</span>
+    <strong class="metric-value-text">{{ uptime }}</strong>
+  </article>
 </section>
 
 <section class="panel">
   <div class="panel-heading">
     <div>
       <p class="eyebrow">Runtime</p>
-      <h2>Listeners</h2>
+      <h2>Active configuration</h2>
     </div>
   </div>
   <dl class="details">
@@ -42,9 +46,30 @@
       <dd><code>{{ admin_listen }}</code></dd>
     </div>
     <div>
+      <dt>Config state</dt>
+      <dd>Active validated snapshot</dd>
+    </div>
+    <div>
       <dt>UI mode</dt>
-      <dd>Server-rendered HTML</dd>
+      <dd>Server-rendered HTML + htmx fragments</dd>
     </div>
   </dl>
+</section>
+
+<section class="panel panel-spaced">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Upstreams</p>
+      <h2>Endpoint health</h2>
+    </div>
+  </div>
+  <div
+    id="upstream-health"
+    hx-get="/admin/fragments/upstream-health"
+    hx-trigger="every 5s"
+    hx-swap="innerHTML"
+  >
+    {% include "fragments/upstream-health.html" %}
+  </div>
 </section>
 {% endblock %}
