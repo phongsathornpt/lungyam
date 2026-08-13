@@ -1,0 +1,36 @@
+<section class="panel panel-spaced" id="manage-upstreams">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Upstreams</p>
+      <h2>Backend pools</h2>
+      <p class="muted">Read-only active configuration. Upstream topology changes are restart-required until runtime reload support is added.</p>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table class="health-table">
+      <thead>
+        <tr>
+          <th scope="col">Pool</th>
+          <th scope="col">Endpoints</th>
+          <th scope="col">Connect</th>
+          <th scope="col">Read</th>
+          <th scope="col">Write</th>
+          <th scope="col">Health interval</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for upstream in upstream_pools %}
+        <tr>
+          <td><strong>{{ upstream.name }}</strong></td>
+          <td>{% for endpoint in upstream.endpoints %}<code>{{ endpoint }}</code>{% if !loop.last %}<br>{% endif %}{% endfor %}</td>
+          <td>{{ upstream.connect_timeout }}</td>
+          <td>{{ upstream.read_timeout }}</td>
+          <td>{{ upstream.write_timeout }}</td>
+          <td>{{ upstream.health_check_interval }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
