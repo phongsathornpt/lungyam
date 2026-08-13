@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Proxy</p>
+    <h1>Upstreams</h1>
+    <p class="muted">Read-only view of backend pools, endpoint health, timeouts, and active health-check settings.</p>
+  </div>
+  <span class="status">Read-only</span>
+</header>
+
+<section class="metrics" aria-label="Upstream summary">
+  <article class="metric-card">
+    <span>Upstreams</span>
+    <strong>{{ upstream_count }}</strong>
+  </article>
+  <article class="metric-card">
+    <span>Endpoints</span>
+    <strong>{{ endpoint_count }}</strong>
+  </article>
+</section>
+
+<section class="panel panel-spaced">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Active configuration</p>
+      <h2>Backend pools</h2>
+      <p class="muted">Changing endpoint topology or health-check services is restart-required until runtime reload support is added.</p>
+    </div>
+  </div>
+
+  {% for upstream in upstreams %}
+  <article class="panel-spaced">
+    <div class="panel-heading panel-heading-row">
+      <div>
+        <p class="eyebrow">Upstream</p>
+        <h2>{{ upstream.name }}</h2>
+      </div>
+      <span class="muted">{{ upstream.endpoints.len() }} endpoints</span>
+    </div>
+
+    <dl class="details">
+      <div><dt>Connect timeout</dt><dd>{{ upstream.connect_timeout }}</dd></div>
+      <div><dt>Read timeout</dt><dd>{{ upstream.read_timeout }}</dd></div>
+      <div><dt>Write timeout</dt><dd>{{ upstream.write_timeout }}</dd></div>
+      <div><dt>Health check interval</dt><dd>{{ upstream.health_check_interval }}</dd></div>
+    </dl>
+
+    <div class="table-wrap panel-spaced">
+      <table>
+        <thead><tr><th scope="col">Endpoint</th><th scope="col">Health</th></tr></thead>
+        <tbody>
+          {% for endpoint in upstream.endpoints %}
+          <tr>
+            <td><code>{{ endpoint.address }}</code></td>
+            <td><span class="health-status {{ endpoint.status_class }}">{{ endpoint.status }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}
