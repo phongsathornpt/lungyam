@@ -42,7 +42,11 @@ fn lifecycle_stages_activates_and_restores_validated_revisions() {
         .expect("stage route change");
     assert_eq!(active.load().expect("active before activation"), initial);
     assert_eq!(
-        lifecycle.state_store().load().expect("staged state").pending_revision,
+        lifecycle
+            .state_store()
+            .load()
+            .expect("staged state")
+            .pending_revision,
         Some(first.revision)
     );
 
@@ -60,7 +64,9 @@ fn lifecycle_stages_activates_and_restores_validated_revisions() {
     let second = lifecycle
         .stage(&structural, None, Some("timeout".into()))
         .expect("stage structural change");
-    let activated = lifecycle.activate_pending().expect("activate structural change");
+    let activated = lifecycle
+        .activate_pending()
+        .expect("activate structural change");
     assert_eq!(activated.revision, second.revision);
     assert!(activated.restart_required);
 
@@ -97,7 +103,13 @@ fn invalid_stage_and_missing_pending_do_not_change_active_config() {
     let mut invalid = initial.clone();
     invalid.routes[0].path = "missing-slash".into();
     assert!(lifecycle.stage(&invalid, None, None).is_err());
-    assert!(lifecycle.revision_store().list().expect("revision list").is_empty());
+    assert!(
+        lifecycle
+            .revision_store()
+            .list()
+            .expect("revision list")
+            .is_empty()
+    );
     assert_eq!(active.load().expect("unchanged active config"), initial);
     assert!(matches!(
         lifecycle.activate_pending(),
