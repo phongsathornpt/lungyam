@@ -3,7 +3,7 @@
     <div>
       <p class="eyebrow">Upstreams</p>
       <h2>Backend pools</h2>
-      <p class="muted">Read-only active configuration. Upstream topology changes are restart-required until runtime reload support is added.</p>
+      <p class="muted">Active configuration. Staged upstream changes remain restart-required until runtime reload support is added.</p>
     </div>
   </div>
 
@@ -33,6 +33,46 @@
       </tbody>
     </table>
   </div>
+
+  {% if writes_enabled %}
+  <div class="panel-spaced">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Edit</p>
+        <h3>Stage upstream updates</h3>
+        <p class="muted">Names are immutable for now. Editing endpoints or timeout/health settings creates a pending revision and does not change the active proxy runtime.</p>
+      </div>
+    </div>
+    {% for upstream in upstream_pools %}
+    <details class="panel-spaced">
+      <summary><strong>{{ upstream.name }}</strong></summary>
+      <form
+        class="route-form panel-spaced"
+        hx-post="/admin/upstreams/stage-create"
+        hx-target="#upstream-update-result-{{ loop.index }}"
+        hx-swap="innerHTML"
+      >
+        <input name="operation" type="hidden" value="update">
+        <input name="original_name" type="hidden" value="{{ upstream.name }}">
+        <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
+        <div class="form-grid">
+          <label class="field"><span>Name</span><input name="upstream_name" type="text" readonly value="{{ upstream.name }}"></label>
+          <label class="field"><span>Endpoints</span><textarea name="endpoints" rows="4" required>{% for endpoint in upstream.endpoints %}{{ endpoint }}{% if !loop.last %}&#10;{% endif %}{% endfor %}</textarea></label>
+          <label class="field"><span>Connect timeout (ms)</span><input name="connect_timeout" type="text" value="{{ upstream.connect_timeout }}"></label>
+          <label class="field"><span>Read timeout (ms)</span><input name="read_timeout" type="text" value="{{ upstream.read_timeout }}"></label>
+          <label class="field"><span>Write timeout (ms)</span><input name="write_timeout" type="text" value="{{ upstream.write_timeout }}"></label>
+          <label class="field"><span>Health check interval (s)</span><input name="health_check_interval" type="text" required value="{{ upstream.health_check_interval }}"></label>
+        </div>
+        <div class="form-actions">
+          <button class="button" type="submit">Stage update</button>
+          <span class="muted">Creates a pending revision. Restart is required after activation.</span>
+        </div>
+      </form>
+      <div id="upstream-update-result-{{ loop.index }}" class="validation-slot panel-spaced" aria-live="polite"><div class="validation-card validation-neutral">No staged update for this upstream yet.</div></div>
+    </details>
+    {% endfor %}
+  </div>
+  {% endif %}
 </section>
 
 {% include "fragments/upstream-candidate.html" %}
