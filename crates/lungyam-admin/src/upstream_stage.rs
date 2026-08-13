@@ -16,6 +16,10 @@ use crate::{AdminState, security};
 pub(super) struct StageUpstreamCreateForm {
     #[serde(default)]
     csrf_token: String,
+    #[serde(default)]
+    operation: String,
+    #[serde(default)]
+    original_name: String,
     upstream_name: String,
     endpoints: String,
     #[serde(default)]
@@ -52,20 +56,31 @@ pub(super) async fn stage_create(
         );
     };
 
-    let candidate = match candidate_config(&config, &form) {
+    let operation = form.operation.trim();
+    let upstream_name = form.upstream_name.trim();
+    let candidate = match operation {
+        "" | "create" => candidate_create_config(&config, &form),
+        "update" => candidate_update_config(&config, &form),
+        other => Err(format!("unsupported upstream mutation operation '{other}'")),
+    };
+    let candidate = match candidate {
         Ok(candidate) => candidate,
         Err(message) => return render_error(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
-    let upstream_name = form.upstream_name.trim();
+    let reason = if operation == "update" {
+        format!("stage upstream update '{}'", form.original_name.trim())
+    } else {
+        format!("stage upstream create '{upstream_name}'")
+    };
 
     match FileConfigLifecycle::new(config_path).stage(
         &candidate,
         Some("admin-web".to_owned()),
-        Some(format!("stage upstream create '{upstream_name}'")),
+        Some(reason),
     ) {
         Ok(metadata) => render_success(metadata.revision),
         Err(error) => {
-            log::error!("failed to stage upstream create: {error}");
+            log::error!("failed to stage upstream mutation: {error}");
             render_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "The pending revision could not be created.",
@@ -74,7 +89,10 @@ pub(super) async fn stage_create(
     }
 }
 
-fn candidate_config(config: &Config, form: &StageUpstreamCreateForm) -> Result<Config, String> {
+fn candidate_create_config(
+    config: &Config,
+    form: &StageUpstreamCreateForm,
+) -> Result<Config, String> {
     let upstream_name = form.upstream_name.trim();
     if upstream_name.is_empty() {
         return Err("upstream name must not be empty".to_owned());
@@ -83,6 +101,40 @@ fn candidate_config(config: &Config, form: &StageUpstreamCreateForm) -> Result<C
         return Err(format!("upstream '{upstream_name}' already exists"));
     }
 
+    let mut candidate = config.clone();
+    candidate
+        .upstreams
+        .insert(upstream_name.to_owned(), upstream_config(form)?);
+    candidate.validate().map_err(|error| error.to_string())?;
+    Ok(candidate)
+}
+
+fn candidate_update_config(
+    config: &Config,
+    form: &StageUpstreamCreateForm,
+) -> Result<Config, String> {
+    let original_name = form.original_name.trim();
+    if original_name.is_empty() {
+        return Err("original upstream name is required for update".to_owned());
+    }
+
+    let upstream_name = form.upstream_name.trim();
+    if upstream_name != original_name {
+        return Err("renaming an existing upstream is not supported yet".to_owned());
+    }
+    if !config.upstreams.contains_key(original_name) {
+        return Err(format!("upstream '{original_name}' was not found"));
+    }
+
+    let mut candidate = config.clone();
+    candidate
+        .upstreams
+        .insert(original_name.to_owned(), upstream_config(form)?);
+    candidate.validate().map_err(|error| error.to_string())?;
+    Ok(candidate)
+}
+
+fn upstream_config(form: &StageUpstreamCreateForm) -> Result<UpstreamConfig, String> {
     let endpoints = form
         .endpoints
         .split([',', '\n'])
@@ -94,27 +146,21 @@ fn candidate_config(config: &Config, form: &StageUpstreamCreateForm) -> Result<C
         return Err("at least one upstream endpoint is required".to_owned());
     }
 
-    let mut candidate = config.clone();
-    candidate.upstreams.insert(
-        upstream_name.to_owned(),
-        UpstreamConfig {
-            endpoints,
-            connect_timeout_ms: parse_optional_duration(
-                &form.connect_timeout,
-                "connect timeout",
-                "ms",
-            )?,
-            read_timeout_ms: parse_optional_duration(&form.read_timeout, "read timeout", "ms")?,
-            write_timeout_ms: parse_optional_duration(&form.write_timeout, "write timeout", "ms")?,
-            health_check_interval_seconds: parse_required_duration(
-                &form.health_check_interval,
-                "health-check interval",
-                "s",
-            )?,
-        },
-    );
-    candidate.validate().map_err(|error| error.to_string())?;
-    Ok(candidate)
+    Ok(UpstreamConfig {
+        endpoints,
+        connect_timeout_ms: parse_optional_duration(
+            &form.connect_timeout,
+            "connect timeout",
+            "ms",
+        )?,
+        read_timeout_ms: parse_optional_duration(&form.read_timeout, "read timeout", "ms")?,
+        write_timeout_ms: parse_optional_duration(&form.write_timeout, "write timeout", "ms")?,
+        health_check_interval_seconds: parse_required_duration(
+            &form.health_check_interval,
+            "health-check interval",
+            "s",
+        )?,
+    })
 }
 
 fn parse_optional_duration(value: &str, label: &str, suffix: &str) -> Result<Option<u64>, String> {
@@ -156,7 +202,7 @@ fn render_success(revision: u64) -> Response {
 }
 
 fn render_error(status: StatusCode, message: &str) -> Response {
-    log::warn!("upstream create staging rejected: {message}");
+    log::warn!("upstream staging rejected: {message}");
     (
         status,
         Html(
@@ -188,7 +234,9 @@ mod tests {
         store::{ConfigStore, FileConfigStore},
     };
 
-    use super::{StageUpstreamCreateForm, candidate_config, stage_create};
+    use super::{
+        StageUpstreamCreateForm, candidate_create_config, candidate_update_config, stage_create,
+    };
     use crate::{AdminState, security};
 
     static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -197,15 +245,29 @@ mod tests {
     fn candidate_create_rejects_duplicate_and_parses_values() {
         let config = test_config(false);
         let duplicate = form("api");
-        assert!(candidate_config(&config, &duplicate).is_err());
+        assert!(candidate_create_config(&config, &duplicate).is_err());
 
-        let candidate = candidate_config(&config, &form("canary")).expect("valid candidate");
+        let candidate =
+            candidate_create_config(&config, &form("canary")).expect("valid candidate");
         let canary = &candidate.upstreams["canary"];
         assert_eq!(canary.endpoints.len(), 2);
         assert_eq!(canary.connect_timeout_ms, Some(2500));
         assert_eq!(canary.read_timeout_ms, Some(10000));
         assert_eq!(canary.write_timeout_ms, Some(15000));
         assert_eq!(canary.health_check_interval_seconds, 7);
+    }
+
+    #[test]
+    fn candidate_update_rejects_rename_and_missing_upstream() {
+        let config = test_config(false);
+        let mut update = update_form("api");
+        let candidate = candidate_update_config(&config, &update).expect("valid update candidate");
+        assert_eq!(candidate.upstreams["api"].endpoints.len(), 2);
+        assert_eq!(candidate.upstreams["api"].connect_timeout_ms, Some(2500));
+
+        update.upstream_name = "renamed".to_owned();
+        assert!(candidate_update_config(&config, &update).is_err());
+        assert!(candidate_update_config(&config, &update_form("missing")).is_err());
     }
 
     #[test]
@@ -309,6 +371,22 @@ mod tests {
     fn form(upstream_name: &str) -> StageUpstreamCreateForm {
         StageUpstreamCreateForm {
             csrf_token: String::new(),
+            operation: "create".to_owned(),
+            original_name: String::new(),
+            upstream_name: upstream_name.to_owned(),
+            endpoints: "127.0.0.1:4000\n127.0.0.1:4001".to_owned(),
+            connect_timeout: "2500".to_owned(),
+            read_timeout: "10000".to_owned(),
+            write_timeout: "15000".to_owned(),
+            health_check_interval: "7".to_owned(),
+        }
+    }
+
+    fn update_form(upstream_name: &str) -> StageUpstreamCreateForm {
+        StageUpstreamCreateForm {
+            csrf_token: String::new(),
+            operation: "update".to_owned(),
+            original_name: upstream_name.to_owned(),
             upstream_name: upstream_name.to_owned(),
             endpoints: "127.0.0.1:4000\n127.0.0.1:4001".to_owned(),
             connect_timeout: "2500".to_owned(),
