@@ -3,11 +3,11 @@
 use std::{collections::BTreeMap, fs, net::SocketAddr, path::Path};
 
 use http::{HeaderName, HeaderValue};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Top-level Lungyam configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Config {
     pub server: ServerConfig,
     #[serde(default)]
@@ -121,13 +121,13 @@ impl Config {
 }
 
 /// Listener settings.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ServerConfig {
     pub listen: String,
 }
 
 /// Admin control-plane listener settings.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct AdminConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -145,7 +145,7 @@ impl Default for AdminConfig {
 }
 
 /// A named pool of backend endpoints.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct UpstreamConfig {
     pub endpoints: Vec<String>,
     #[serde(default)]
@@ -159,7 +159,7 @@ pub struct UpstreamConfig {
 }
 
 /// Declarative request route.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RouteConfig {
     pub name: String,
     #[serde(default)]
@@ -176,7 +176,7 @@ pub struct RouteConfig {
 }
 
 /// Policies attached to a route.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RoutePolicies {
     #[serde(default)]
     pub request_headers: HeaderTransform,
@@ -189,7 +189,7 @@ pub struct RoutePolicies {
 }
 
 /// Header mutations applied in order: remove, then add/replace.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct HeaderTransform {
     #[serde(default)]
     pub add: BTreeMap<String, String>,
@@ -198,7 +198,7 @@ pub struct HeaderTransform {
 }
 
 /// Fixed-window local rate limit configuration.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RateLimitConfig {
     pub requests: u64,
     pub window_seconds: u64,
