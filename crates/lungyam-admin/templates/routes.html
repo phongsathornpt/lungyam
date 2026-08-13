@@ -16,7 +16,7 @@
       <p class="eyebrow">Active configuration</p>
       <h2>{{ route_count }} configured routes</h2>
     </div>
-    <span class="muted">New candidates can be validated now; persistence is intentionally not enabled yet.</span>
+    <span class="muted">Route changes are staged as pending revisions before activation.</span>
   </div>
   <div class="table-wrap">
     <table class="route-table">
@@ -28,6 +28,7 @@
           <th scope="col">Upstream</th>
           <th scope="col">Priority</th>
           <th scope="col">Policies</th>
+          <th scope="col">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -50,6 +51,12 @@
               <span class="policy-badge">Rate {{ route.rate_limit }}</span>
               <span class="policy-badge">Body {{ route.body_limit }}</span>
             </div>
+          </td>
+          <td>
+            <form method="get" action="/admin/routes/edit">
+              <input type="hidden" name="name" value="{{ route.name }}">
+              <button class="button button-secondary" type="submit">Edit</button>
+            </form>
           </td>
         </tr>
         {% endfor %}
