@@ -151,6 +151,7 @@ mod tests {
             admin: AdminConfig {
                 enabled: true,
                 listen: "127.0.0.1:19090".to_owned(),
+                read_only: true,
             },
             upstreams,
             routes: vec![RouteConfig {

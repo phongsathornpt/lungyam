@@ -137,6 +137,7 @@ fn test_config() -> Config {
         admin: AdminConfig {
             enabled: true,
             listen: "127.0.0.1:9090".to_owned(),
+            read_only: true,
         },
         upstreams,
         routes: vec![RouteConfig {
