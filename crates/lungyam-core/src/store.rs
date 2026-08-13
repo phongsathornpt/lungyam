@@ -73,29 +73,34 @@ fn atomic_replace(path: &Path, contents: &[u8]) -> io::Result<()> {
         std::process::id()
     ));
 
-    let result = (|| {
-        let mut temp = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp_path)?;
-        temp.write_all(contents)?;
-        temp.flush()?;
-        temp.sync_all()?;
-
-        if let Ok(metadata) = fs::metadata(path) {
-            fs::set_permissions(&temp_path, metadata.permissions())?;
-        }
-
-        fs::rename(&temp_path, path)?;
-        sync_parent_directory(parent)?;
-        Ok(())
-    })();
-
+    let result = write_and_replace(path, parent, &temp_path, contents);
     if result.is_err() {
         let _ = fs::remove_file(&temp_path);
     }
-
     result
+}
+
+fn write_and_replace(
+    path: &Path,
+    parent: &Path,
+    temp_path: &Path,
+    contents: &[u8],
+) -> io::Result<()> {
+    let mut temp = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(temp_path)?;
+    temp.write_all(contents)?;
+    temp.flush()?;
+    temp.sync_all()?;
+    drop(temp);
+
+    if let Ok(metadata) = fs::metadata(path) {
+        fs::set_permissions(temp_path, metadata.permissions())?;
+    }
+
+    fs::rename(temp_path, path)?;
+    sync_parent_directory(parent)
 }
 
 #[cfg(unix)]
@@ -112,7 +117,7 @@ fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
 mod tests {
     use std::{
         fs,
-        path::PathBuf,
+        path::{Path, PathBuf},
         sync::atomic::{AtomicU64, Ordering},
     };
 
@@ -176,7 +181,7 @@ routes:
         fs::remove_dir_all(directory).expect("remove test directory");
     }
 
-    fn assert_no_temp_files(directory: &PathBuf) {
+    fn assert_no_temp_files(directory: &Path) {
         let leftovers: Vec<_> = fs::read_dir(directory)
             .expect("read test directory")
             .filter_map(Result::ok)
