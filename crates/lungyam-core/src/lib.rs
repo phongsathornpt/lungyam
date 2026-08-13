@@ -1,7 +1,9 @@
 //! Core domain types and policies shared by Lungyam runtimes.
 
 pub mod config;
+pub mod config_diff;
 pub mod revision;
+pub mod revision_state;
 pub mod routing;
 pub mod runtime;
 pub mod store;
