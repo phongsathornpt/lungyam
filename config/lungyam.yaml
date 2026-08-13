@@ -1,6 +1,10 @@
 server:
   listen: 0.0.0.0:8080
 
+admin:
+  enabled: true
+  listen: 127.0.0.1:9090
+
 upstreams:
   app:
     endpoints:

@@ -2,6 +2,7 @@
 members = [
     "crates/lungyam-core",
     "crates/lungyam-proxy",
+    "crates/lungyam-admin",
     "crates/lungyam-cli",
 ]
 resolver = "2"

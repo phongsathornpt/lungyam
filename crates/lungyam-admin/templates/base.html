@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Lungyam Admin</title>
+  <link rel="stylesheet" href="/admin/assets/lungyam.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/admin" aria-label="Lungyam Admin home">
+        <span class="brand-mark">LY</span>
+        <span>
+          <strong>Lungyam</strong>
+          <small>Control plane</small>
+        </span>
+      </a>
+      <nav aria-label="Admin navigation">
+        <a class="nav-link active" href="/admin">Overview</a>
+        <span class="nav-section">Proxy</span>
+        <span class="nav-link disabled">Routes</span>
+        <span class="nav-link disabled">Upstreams</span>
+        <span class="nav-section">Configuration</span>
+        <span class="nav-link disabled">Config</span>
+        <span class="nav-link disabled">Revisions</span>
+      </nav>
+    </aside>
+    <main class="content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

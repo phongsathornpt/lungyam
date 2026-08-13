@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Overview</p>
+    <h1>Lungyam Admin</h1>
+    <p class="muted">Read-only control-plane foundation. Proxy traffic remains on the Pingora data plane.</p>
+  </div>
+  <span class="status"><span class="status-dot"></span> Running</span>
+</header>
+
+<section class="metrics" aria-label="Configuration summary">
+  <article class="metric-card">
+    <span>Routes</span>
+    <strong>{{ route_count }}</strong>
+  </article>
+  <article class="metric-card">
+    <span>Upstreams</span>
+    <strong>{{ upstream_count }}</strong>
+  </article>
+  <article class="metric-card">
+    <span>Endpoints</span>
+    <strong>{{ endpoint_count }}</strong>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Runtime</p>
+      <h2>Listeners</h2>
+    </div>
+  </div>
+  <dl class="details">
+    <div>
+      <dt>Proxy data plane</dt>
+      <dd><code>{{ proxy_listen }}</code></dd>
+    </div>
+    <div>
+      <dt>Admin control plane</dt>
+      <dd><code>{{ admin_listen }}</code></dd>
+    </div>
+    <div>
+      <dt>UI mode</dt>
+      <dd>Server-rendered HTML</dd>
+    </div>
+  </dl>
+</section>
+{% endblock %}
