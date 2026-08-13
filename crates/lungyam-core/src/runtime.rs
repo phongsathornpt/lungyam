@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, sync::RwLock, time::Instant};
 
-use crate::config::Config;
+use crate::config::{Config, RouteConfig};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveConfigSummary {
@@ -30,6 +30,7 @@ pub struct RuntimeSnapshot {
 pub struct RuntimeStatus {
     started_at: Instant,
     active_config: ActiveConfigSummary,
+    route_configs: Vec<RouteConfig>,
     endpoint_health: RwLock<BTreeMap<(String, String), bool>>,
 }
 
@@ -61,6 +62,7 @@ impl RuntimeStatus {
                 upstream_count: config.upstreams.len(),
                 endpoint_count,
             },
+            route_configs: config.routes.clone(),
             endpoint_health: RwLock::new(endpoint_health),
         }
     }
@@ -71,6 +73,12 @@ impl RuntimeStatus {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         states.insert((upstream.to_owned(), endpoint.to_owned()), healthy);
+    }
+
+    /// Returns the currently active route configuration snapshot.
+    #[must_use]
+    pub fn routes(&self) -> Vec<RouteConfig> {
+        self.route_configs.clone()
     }
 
     #[must_use]
@@ -120,6 +128,11 @@ mod tests {
                 .iter()
                 .all(|endpoint| endpoint.healthy)
         );
+
+        let routes = status.routes();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].name, "api");
+        assert_eq!(routes[0].upstream, "api");
 
         status.set_endpoint_health("api", "127.0.0.1:3001", false);
         let updated = status.snapshot();

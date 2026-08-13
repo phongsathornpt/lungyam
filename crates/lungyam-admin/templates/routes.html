@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Proxy</p>
+    <h1>Routes</h1>
+    <p class="muted">Active routes in evaluation order: higher priority first, then more specific paths.</p>
+  </div>
+  <span class="status"><span class="status-dot"></span> Read-only</span>
+</header>
+
+<section class="panel">
+  <div class="panel-heading panel-heading-row">
+    <div>
+      <p class="eyebrow">Active configuration</p>
+      <h2>{{ route_count }} configured routes</h2>
+    </div>
+    <span class="muted">Mutation arrives in the next route-management step.</span>
+  </div>
+  <div class="table-wrap">
+    <table class="route-table">
+      <thead>
+        <tr>
+          <th scope="col">Order</th>
+          <th scope="col">Name</th>
+          <th scope="col">Match</th>
+          <th scope="col">Upstream</th>
+          <th scope="col">Priority</th>
+          <th scope="col">Policies</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for route in routes %}
+        <tr>
+          <td class="order-cell">{{ loop.index }}</td>
+          <td><strong>{{ route.name }}</strong></td>
+          <td>
+            <div class="route-match">
+              <code>{{ route.methods }}</code>
+              <code>{{ route.host }}</code>
+              <code>{{ route.path }}</code>
+            </div>
+          </td>
+          <td><code>{{ route.upstream }}</code></td>
+          <td>{{ route.priority }}</td>
+          <td>
+            <div class="policy-list">
+              <span class="policy-badge">Headers {{ route.header_operations }}</span>
+              <span class="policy-badge">Rate {{ route.rate_limit }}</span>
+              <span class="policy-badge">Body {{ route.body_limit }}</span>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
