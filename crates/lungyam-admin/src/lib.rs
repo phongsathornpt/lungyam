@@ -113,7 +113,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use askama::Template;
-    use axum::{body::Body, http::Request};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use lungyam_core::config::{
         AdminConfig, Config, RouteConfig, RoutePolicies, ServerConfig, UpstreamConfig,
     };
