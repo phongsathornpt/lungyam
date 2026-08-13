@@ -4,13 +4,14 @@
 <header class="page-header">
   <div>
     <p class="eyebrow">Routes</p>
-    <h1>New route</h1>
-    <p class="muted">Validate a candidate route, then stage it as a pending revision for review. Staging never activates the proxy configuration.</p>
+    <h1>Manage routes</h1>
+    <p class="muted">Validate a new route or stage updates to existing routes as pending revisions. Staging never activates the proxy configuration.</p>
   </div>
   <a class="button button-secondary" href="/admin/routes">Back to routes</a>
 </header>
 
 <section class="panel form-panel">
+  <div class="panel-heading"><div><p class="eyebrow">Create</p><h2>New route</h2></div></div>
   <form
     class="route-form"
     method="post"
@@ -19,6 +20,7 @@
     hx-target="#route-validation"
     hx-swap="innerHTML"
   >
+    <input name="operation" type="hidden" value="create">
     <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
     <div class="form-grid">
       <label class="field">
@@ -84,7 +86,7 @@
         hx-swap="innerHTML"
       >Validate only</button>
       {% if writes_enabled %}
-      <button class="button" type="submit">Stage pending revision</button>
+      <button class="button" type="submit">Stage create</button>
       <span class="muted">Staging persists a revision for review; it does not activate it.</span>
       {% else %}
       <span class="muted">Admin writes are disabled. Enable <code>admin.read_only: false</code> on a loopback admin listener to stage changes.</span>
@@ -96,4 +98,6 @@
     <div class="validation-card validation-neutral">Validation only checks the candidate. Stage it for review only when writes are enabled.</div>
   </div>
 </section>
+
+{% include "fragments/route-updates.html" %}
 {% endblock %}
