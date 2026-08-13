@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Routes</p>
+    <h1>New route</h1>
+    <p class="muted">Build a candidate route and validate it against the active Lungyam configuration before any persistence is introduced.</p>
+  </div>
+  <a class="button button-secondary" href="/admin/routes">Back to routes</a>
+</header>
+
+<section class="panel form-panel">
+  <form
+    class="route-form"
+    method="post"
+    action="/admin/routes/validate"
+    hx-post="/admin/routes/validate"
+    hx-target="#route-validation"
+    hx-swap="innerHTML"
+  >
+    <div class="form-grid">
+      <label class="field">
+        <span>Name</span>
+        <input name="name" type="text" required placeholder="api-v2">
+      </label>
+      <label class="field">
+        <span>Upstream</span>
+        <select name="upstream" required>
+          {% for upstream in upstreams %}
+          <option value="{{ upstream }}">{{ upstream }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span>Host</span>
+        <input name="host" type="text" placeholder="api.example.com">
+        <small>Leave empty to match any host.</small>
+      </label>
+      <label class="field">
+        <span>Path</span>
+        <input name="path" type="text" required value="/">
+      </label>
+      <label class="field">
+        <span>Methods</span>
+        <input name="methods" type="text" placeholder="GET, POST">
+        <small>Comma-separated. Leave empty to match any method.</small>
+      </label>
+      <label class="field">
+        <span>Priority</span>
+        <input name="priority" type="number" value="0">
+      </label>
+    </div>
+
+    <div class="form-section">
+      <div>
+        <p class="eyebrow">Policies</p>
+        <h2>Limits</h2>
+      </div>
+      <div class="form-grid form-grid-three">
+        <label class="field">
+          <span>Rate-limit requests</span>
+          <input name="rate_limit_requests" type="number" min="1" placeholder="100">
+        </label>
+        <label class="field">
+          <span>Rate-limit window (seconds)</span>
+          <input name="rate_limit_window_seconds" type="number" min="1" placeholder="60">
+        </label>
+        <label class="field">
+          <span>Max request body (bytes)</span>
+          <input name="max_request_body_bytes" type="number" min="1" placeholder="1048576">
+        </label>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="button" type="submit">Validate route</button>
+      <span class="muted">Validation only — this does not write or activate configuration.</span>
+    </div>
+  </form>
+
+  <div id="route-validation" class="validation-slot" aria-live="polite">
+    <div class="validation-card validation-neutral">Submit the form to validate a candidate against the active config.</div>
+  </div>
+</section>
+{% endblock %}
