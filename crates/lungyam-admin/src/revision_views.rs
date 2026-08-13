@@ -2,11 +2,14 @@ use std::path::Path;
 
 use askama::Template;
 use lungyam_core::{
+    config::Config,
     config_diff::ConfigDiff,
     revision::{FileRevisionStore, RevisionMetadata},
     revision_state::FileRevisionStateStore,
 };
 use serde::Deserialize;
+
+use crate::security;
 
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct DiffQuery {
@@ -33,6 +36,9 @@ struct RevisionsTemplate {
     message: String,
     active_revision: String,
     pending_revision: String,
+    has_pending: bool,
+    writes_enabled: bool,
+    csrf_token: String,
     can_diff: bool,
     revisions: Vec<RevisionView>,
 }
@@ -56,7 +62,8 @@ struct ConfigDiffTemplate {
     routes_changed: String,
 }
 
-pub(crate) fn render_revisions(config_path: Option<&Path>) -> Result<String, String> {
+pub(crate) fn render_revisions(config_path: Option<&Path>, config: &Config) -> Result<String, String> {
+    let csrf_token = security::csrf_token().expose().to_owned();
     let Some(config_path) = config_path else {
         return RevisionsTemplate {
             overview_active: false,
@@ -66,6 +73,9 @@ pub(crate) fn render_revisions(config_path: Option<&Path>) -> Result<String, Str
                 .to_owned(),
             active_revision: "Not set".to_owned(),
             pending_revision: "Not set".to_owned(),
+            has_pending: false,
+            writes_enabled: false,
+            csrf_token,
             can_diff: false,
             revisions: Vec::new(),
         }
@@ -87,12 +97,15 @@ pub(crate) fn render_revisions(config_path: Option<&Path>) -> Result<String, Str
         routes_active: false,
         available: true,
         message: if revisions.is_empty() {
-            "No persisted revisions yet. Route writes are still disabled.".to_owned()
+            "No persisted revisions yet.".to_owned()
         } else {
             "Immutable snapshots stored beside the active configuration.".to_owned()
         },
         active_revision: revision_label(state.active_revision),
         pending_revision: revision_label(state.pending_revision),
+        has_pending: state.pending_revision.is_some(),
+        writes_enabled: security::writes_enabled(config),
+        csrf_token,
         can_diff: revisions.len() >= 2,
         revisions,
     }
@@ -121,9 +134,10 @@ pub(crate) fn render_diff(config_path: Option<&Path>, query: DiffQuery) -> Resul
         message: if diff.is_empty() {
             "The selected revisions contain the same effective configuration.".to_owned()
         } else if diff.restart_required() {
-            "This diff contains structural changes that currently require a restart.".to_owned()
+            "This diff contains structural changes that require a process restart after activation."
+                .to_owned()
         } else {
-            "This diff only contains route-level changes that are candidates for future hot reload."
+            "This route-only diff can be applied to the running proxy without a restart."
                 .to_owned()
         },
         from_revision: format!("#{:06}", query.from),
