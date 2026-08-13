@@ -35,6 +35,7 @@
         type="button"
         hx-post="/admin/upstreams/stage-create"
         hx-include="closest form"
+        hx-vals='{"operation":"create"}'
         hx-target="#upstream-validation-result"
         hx-swap="innerHTML"
       >Stage upstream create</button>
