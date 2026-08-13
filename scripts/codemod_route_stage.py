@@ -1,0 +1,288 @@
+from pathlib import Path
+import re
+
+# Core: writes stay loopback-only until authentication exists.
+path = Path("crates/lungyam-core/src/config.rs")
+text = path.read_text()
+old = '''        if self.admin.listen.parse::<SocketAddr>().is_err() {
+            return Err(ConfigError::Validation(
+                "admin.listen must be a valid socket address".to_owned(),
+            ));
+        }
+'''
+new = '''        let admin_listen = self.admin.listen.parse::<SocketAddr>().map_err(|_| {
+            ConfigError::Validation("admin.listen must be a valid socket address".to_owned())
+        })?;
+        if self.admin.enabled && !self.admin.read_only && !admin_listen.ip().is_loopback() {
+            return Err(ConfigError::Validation(
+                "admin writes require admin.listen to use a loopback address until authentication is configured"
+                    .to_owned(),
+            ));
+        }
+'''
+if text.count(old) != 1:
+    raise SystemExit("admin listener validation anchor mismatch")
+text = text.replace(old, new)
+anchor = '''    #[test]
+    fn rejects_invalid_admin_listener() {
+'''
+test = '''    #[test]
+    fn rejects_write_enabled_non_loopback_admin_listener() {
+        let yaml = VALID.replace(
+            "upstreams:",
+            "admin:\\n  enabled: true\\n  listen: 0.0.0.0:9091\\n  read_only: false\\nupstreams:",
+        );
+        let error = Config::from_yaml(&yaml).expect_err("public admin writes must be rejected");
+        assert!(error.to_string().contains("loopback"));
+    }
+
+'''
+if text.count(anchor) != 1:
+    raise SystemExit("admin validation test anchor mismatch")
+text = text.replace(anchor, test + anchor)
+path.write_text(text)
+
+# Route forms: carry CSRF token and expose typed candidate config creation.
+path = Path("crates/lungyam-admin/src/route_forms.rs")
+text = path.read_text()
+replacements = [
+    (
+        "pub(crate) struct RouteForm {\n    pub name: String,",
+        "pub(crate) struct RouteForm {\n    #[serde(default)]\n    pub csrf_token: String,\n    pub name: String,",
+    ),
+    (
+        "    upstreams: Vec<String>,\n}",
+        "    upstreams: Vec<String>,\n    csrf_token: String,\n    writes_enabled: bool,\n}",
+    ),
+    (
+        "pub(crate) fn render_new_route(config: &Config) -> askama::Result<String> {\n    RouteFormTemplate {\n        overview_active: false,\n        routes_active: true,\n        upstreams: config.upstreams.keys().cloned().collect(),\n    }",
+        "pub(crate) fn render_new_route(\n    config: &Config,\n    csrf_token: &str,\n    writes_enabled: bool,\n) -> askama::Result<String> {\n    RouteFormTemplate {\n        overview_active: false,\n        routes_active: true,\n        upstreams: config.upstreams.keys().cloned().collect(),\n        csrf_token: csrf_token.to_owned(),\n        writes_enabled,\n    }",
+    ),
+    (
+        '''    let result = candidate_route(form).and_then(|candidate| {
+        let mut candidate_config = config.clone();
+        candidate_config.routes.push(candidate);
+        candidate_config
+            .validate()
+            .map_err(|error| error.to_string())
+    });''',
+        '''    let result = candidate_config(config, form).map(|_| ());''',
+    ),
+    (
+        "fn candidate_route(form: RouteForm) -> Result<RouteConfig, String> {",
+        '''pub(crate) fn candidate_config(config: &Config, form: RouteForm) -> Result<Config, String> {
+    let mut candidate_config = config.clone();
+    candidate_config.routes.push(candidate_route(form)?);
+    candidate_config
+        .validate()
+        .map_err(|error| error.to_string())?;
+    Ok(candidate_config)
+}
+
+fn candidate_route(form: RouteForm) -> Result<RouteConfig, String> {''',
+    ),
+]
+for old, new in replacements:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"route_forms anchor mismatch count={count}: {old[:80]!r}")
+    text = text.replace(old, new)
+pattern = re.compile(r"(RouteForm \{\n)(?P<indent>\s+)(name:)")
+text, count = pattern.subn(r"\1\g<indent>csrf_token: String::new(),\n\g<indent>\3", text)
+if count < 4:
+    raise SystemExit(f"expected route form test literals, found {count}")
+path.write_text(text)
+
+# New Route page: validate-only remains available, staging is explicit and guarded.
+path = Path("crates/lungyam-admin/templates/route-new.html")
+text = path.read_text()
+text = text.replace(
+    "Build a candidate route and validate it against the active Lungyam configuration before any persistence is introduced.",
+    "Validate a candidate route, then stage it as a pending revision for review. Staging never activates the proxy configuration.",
+)
+text = text.replace(
+    '    action="/admin/routes/validate"\n    hx-post="/admin/routes/validate"',
+    '    action="/admin/routes/stage"\n    hx-post="/admin/routes/stage"',
+)
+text = text.replace(
+    '  >\n    <div class="form-grid">',
+    '  >\n    <input name="csrf_token" type="hidden" value="{{ csrf_token }}">\n    <div class="form-grid">',
+)
+old = '''    <div class="form-actions">
+      <button class="button" type="submit">Validate route</button>
+      <span class="muted">Validation only — this does not write or activate configuration.</span>
+    </div>'''
+new = '''    <div class="form-actions">
+      <button
+        class="button button-secondary"
+        type="button"
+        hx-post="/admin/routes/validate"
+        hx-include="closest form"
+        hx-target="#route-validation"
+        hx-swap="innerHTML"
+      >Validate only</button>
+      {% if writes_enabled %}
+      <button class="button" type="submit">Stage pending revision</button>
+      <span class="muted">Staging persists a revision for review; it does not activate it.</span>
+      {% else %}
+      <span class="muted">Admin is read-only. Set <code>admin.read_only: false</code> on a loopback listener to enable staging.</span>
+      {% endif %}
+    </div>'''
+if text.count(old) != 1:
+    raise SystemExit("route form action anchor mismatch")
+text = text.replace(old, new)
+path.write_text(text)
+
+# Admin router/state/handler wiring.
+path = Path("crates/lungyam-admin/src/lib.rs")
+text = path.read_text()
+replacements = [
+    ("mod revision_views;\nmod route_forms;", "mod revision_views;\nmod route_forms;\nmod security;"),
+    (
+        "    config::{Config, RouteConfig},\n    routing::sort_routes,",
+        "    config::{Config, RouteConfig},\n    lifecycle::FileConfigLifecycle,\n    routing::sort_routes,",
+    ),
+    ("use route_simulator::RouteMatchForm;", "use route_simulator::RouteMatchForm;\nuse security::CsrfToken;"),
+    (
+        "    config_path: Option<PathBuf>,\n}",
+        "    config_path: Option<PathBuf>,\n    csrf_token: CsrfToken,\n}",
+    ),
+    (
+        "fn build_router(runtime: Arc<RuntimeStatus>, config_path: Option<PathBuf>) -> Router {\n    Router::new()",
+        "fn build_router(runtime: Arc<RuntimeStatus>, config_path: Option<PathBuf>) -> Router {\n    let csrf_token = CsrfToken::generate().expect(\"failed to obtain system entropy for admin CSRF token\");\n    Router::new()",
+    ),
+    (
+        '        .route("/admin/routes/validate", post(validate_route))\n        .route("/admin/routes/simulate", post(simulate_route))',
+        '        .route("/admin/routes/validate", post(validate_route))\n        .route("/admin/routes/stage", post(stage_route))\n        .route("/admin/routes/simulate", post(simulate_route))',
+    ),
+    (
+        "            runtime,\n            config_path,\n        })",
+        "            runtime,\n            config_path,\n            csrf_token,\n        })",
+    ),
+    (
+        '''async fn new_route_page(State(state): State<AdminState>) -> Response {
+    render_html_result(
+        route_forms::render_new_route(&state.runtime.config()),
+        "new route form",
+    )
+}''',
+        '''async fn new_route_page(State(state): State<AdminState>) -> Response {
+    let config = state.runtime.config();
+    render_html_result(
+        route_forms::render_new_route(
+            &config,
+            state.csrf_token.expose(),
+            !config.admin.read_only,
+        ),
+        "new route form",
+    )
+}''',
+    ),
+]
+for old, new in replacements:
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"admin lib anchor mismatch count={count}: {old[:80]!r}")
+    text = text.replace(old, new)
+anchor = "async fn simulate_route(\n"
+handler = '''async fn stage_route(State(state): State<AdminState>, Form(form): Form<RouteForm>) -> Response {
+    let config = state.runtime.config();
+    let route_name = form.name.trim().to_owned();
+    if config.admin.read_only {
+        return route_stage_response(
+            StatusCode::FORBIDDEN,
+            false,
+            route_name,
+            String::new(),
+            "Admin is configured as read-only.".to_owned(),
+        );
+    }
+    if !state.csrf_token.verify(&form.csrf_token) {
+        return route_stage_response(
+            StatusCode::FORBIDDEN,
+            false,
+            route_name,
+            String::new(),
+            "CSRF token validation failed.".to_owned(),
+        );
+    }
+    let Some(config_path) = state.config_path.as_ref() else {
+        return route_stage_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            false,
+            route_name,
+            String::new(),
+            "Config path is unavailable; staging is disabled for this admin router.".to_owned(),
+        );
+    };
+    let candidate = match route_forms::candidate_config(&config, form) {
+        Ok(candidate) => candidate,
+        Err(message) => {
+            return route_stage_response(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                false,
+                route_name,
+                String::new(),
+                message,
+            );
+        }
+    };
+    match FileConfigLifecycle::new(config_path).stage(
+        &candidate,
+        Some("admin-web".to_owned()),
+        Some(format!("stage route '{route_name}'")),
+    ) {
+        Ok(metadata) => route_stage_response(
+            StatusCode::OK,
+            true,
+            route_name,
+            format!("#{:06}", metadata.revision),
+            String::new(),
+        ),
+        Err(error) => route_stage_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            false,
+            route_name,
+            String::new(),
+            error.to_string(),
+        ),
+    }
+}
+
+fn route_stage_response(
+    status: StatusCode,
+    success: bool,
+    route_name: String,
+    revision: String,
+    message: String,
+) -> Response {
+    #[derive(Template)]
+    #[template(path = "fragments/route-stage.html")]
+    struct RouteStageTemplate {
+        success: bool,
+        route_name: String,
+        revision: String,
+        message: String,
+    }
+
+    match (RouteStageTemplate {
+        success,
+        route_name,
+        revision,
+        message,
+    })
+    .render()
+    {
+        Ok(html) => (status, Html(html)).into_response(),
+        Err(error) => {
+            log::error!("failed to render route stage result: {error}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+'''
+if text.count(anchor) != 1:
+    raise SystemExit("stage handler insertion anchor mismatch")
+text = text.replace(anchor, handler + anchor)
+path.write_text(text)
