@@ -54,11 +54,7 @@ impl FileRevisionStateStore {
         let Some(revision) = revision else {
             return Ok(());
         };
-        if self
-            .revisions_root
-            .join(format!("{revision:06}"))
-            .is_dir()
-        {
+        if self.revisions_root.join(format!("{revision:06}")).is_dir() {
             Ok(())
         } else {
             Err(RevisionStateError::UnknownRevision(revision))
@@ -79,10 +75,7 @@ pub enum RevisionStateError {
 fn atomic_replace(path: &Path, contents: &str) -> io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let temp_path = parent.join(format!(
-        ".state.yaml.tmp-{}-{sequence}",
-        std::process::id()
-    ));
+    let temp_path = parent.join(format!(".state.yaml.tmp-{}-{sequence}", std::process::id()));
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
