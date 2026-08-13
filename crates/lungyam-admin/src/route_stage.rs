@@ -115,6 +115,7 @@ pub(super) async fn stage_route(
     let candidate = match operation {
         "" | "create" => route_forms::candidate_config(&config, form.route),
         "update" => candidate_updated_config(&config, &form.original_name, form.route),
+        "delete" => candidate_deleted_config(&config, &form.original_name),
         other => Err(format!("unsupported route mutation operation '{other}'")),
     };
     let candidate = match candidate {
@@ -130,13 +131,13 @@ pub(super) async fn stage_route(
         }
     };
 
-    let reason = if operation == "update" {
-        format!(
+    let reason = match operation {
+        "update" => format!(
             "stage route update '{}' -> '{route_name}'",
             form.original_name.trim()
-        )
-    } else {
-        format!("stage route '{route_name}'")
+        ),
+        "delete" => format!("stage route delete '{}'", form.original_name.trim()),
+        _ => format!("stage route '{route_name}'"),
     };
 
     match FileConfigLifecycle::new(config_path).stage(
@@ -290,6 +291,23 @@ fn candidate_updated_config(
     Ok(candidate)
 }
 
+fn candidate_deleted_config(config: &Config, original_name: &str) -> Result<Config, String> {
+    let original_name = original_name.trim();
+    if original_name.is_empty() {
+        return Err("route name must not be empty".to_owned());
+    }
+
+    let mut candidate = config.clone();
+    let index = candidate
+        .routes
+        .iter()
+        .position(|route| route.name == original_name)
+        .ok_or_else(|| format!("route '{original_name}' was not found"))?;
+    candidate.routes.remove(index);
+    candidate.validate().map_err(|error| error.to_string())?;
+    Ok(candidate)
+}
+
 fn render_stage(
     status: StatusCode,
     success: bool,
@@ -322,8 +340,8 @@ mod tests {
     };
 
     use super::{
-        StageRouteForm, candidate_updated_config, candidate_upstream_config,
-        parse_optional_duration,
+        StageRouteForm, candidate_deleted_config, candidate_updated_config,
+        candidate_upstream_config, parse_optional_duration,
     };
     use crate::route_forms::RouteForm;
 
@@ -359,6 +377,14 @@ mod tests {
 
         assert_eq!(updated.routes[0].name, "renamed");
         assert_eq!(updated.routes[1].name, "second");
+    }
+
+    #[test]
+    fn delete_removes_existing_route_and_rejects_missing_route() {
+        let config = test_config();
+        let deleted = candidate_deleted_config(&config, "api").expect("valid delete");
+        assert!(deleted.routes.is_empty());
+        assert!(candidate_deleted_config(&config, "missing").is_err());
     }
 
     #[test]

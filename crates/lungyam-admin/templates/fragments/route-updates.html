@@ -15,14 +15,7 @@
       <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
       <div class="form-grid">
         <label class="field"><span>Name</span><input name="name" type="text" required value="{{ route.name }}"></label>
-        <label class="field">
-          <span>Upstream</span>
-          <select name="upstream" required>
-            {% for upstream in route.upstreams %}
-            <option value="{{ upstream.name }}"{% if upstream.selected %} selected{% endif %}>{{ upstream.name }}</option>
-            {% endfor %}
-          </select>
-        </label>
+        <label class="field"><span>Upstream</span><select name="upstream" required>{% for upstream in route.upstreams %}<option value="{{ upstream.name }}"{% if upstream.selected %} selected{% endif %}>{{ upstream.name }}</option>{% endfor %}</select></label>
         <label class="field"><span>Host</span><input name="host" type="text" value="{{ route.host }}"></label>
         <label class="field"><span>Path</span><input name="path" type="text" required value="{{ route.path }}"></label>
         <label class="field"><span>Methods</span><input name="methods" type="text" value="{{ route.methods }}"></label>
@@ -39,13 +32,21 @@
         <label class="field"><span>Rate-limit window (seconds)</span><input name="rate_limit_window_seconds" type="number" min="1" value="{{ route.rate_limit_window_seconds }}"></label>
         <label class="field"><span>Max request body (bytes)</span><input name="max_request_body_bytes" type="number" min="1" value="{{ route.max_request_body_bytes }}"></label>
       </div>
-      {% if writes_enabled %}
-      <div class="form-actions"><button class="button" type="submit">Stage update</button><span class="muted">Active routing remains unchanged until the pending revision is activated.</span></div>
-      {% else %}
-      <div class="form-actions"><span class="muted">Admin writes are disabled for this listener.</span></div>
-      {% endif %}
+      {% if writes_enabled %}<div class="form-actions"><button class="button" type="submit">Stage update</button><span class="muted">Active routing remains unchanged until the pending revision is activated.</span></div>{% else %}<div class="form-actions"><span class="muted">Admin writes are disabled for this listener.</span></div>{% endif %}
     </form>
-    <div id="route-mutation-{{ loop.index }}" class="validation-slot panel-spaced" aria-live="polite"><div class="validation-card validation-neutral">No staged update for this route yet.</div></div>
+    {% if writes_enabled %}
+    <form class="form-actions panel-spaced" method="post" action="/admin/routes/stage" hx-post="/admin/routes/stage" hx-target="#route-mutation-{{ loop.index }}" hx-swap="innerHTML" hx-confirm="Stage deletion of route '{{ route.name }}'?">
+      <input name="operation" type="hidden" value="delete">
+      <input name="original_name" type="hidden" value="{{ route.name }}">
+      <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
+      <input name="name" type="hidden" value="{{ route.name }}">
+      <input name="path" type="hidden" value="{{ route.path }}">
+      {% for upstream in route.upstreams %}{% if upstream.selected %}<input name="upstream" type="hidden" value="{{ upstream.name }}">{% endif %}{% endfor %}
+      <button class="button button-secondary" type="submit">Stage delete</button>
+      <span class="muted">Creates a pending revision; active routing remains unchanged until activation.</span>
+    </form>
+    {% endif %}
+    <div id="route-mutation-{{ loop.index }}" class="validation-slot panel-spaced" aria-live="polite"><div class="validation-card validation-neutral">No staged change for this route yet.</div></div>
   </details>
   {% endfor %}
 </section>
