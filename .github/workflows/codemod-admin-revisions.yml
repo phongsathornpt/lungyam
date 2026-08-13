@@ -1,0 +1,91 @@
+name: Codemod admin revisions wiring
+
+on:
+  push:
+    branches:
+      - feat/admin-config-revisions
+    paths:
+      - .github/workflows/codemod-admin-revisions.yml
+
+permissions:
+  contents: write
+
+jobs:
+  codemod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/admin-config-revisions
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Wire revision routes and config path
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/lungyam-admin/src/lib.rs')
+          text = path.read_text()
+
+          replacements = [
+              (
+                  'mod route_forms;\nmod route_simulator;\n\nuse std::{io, net::TcpListener as StdTcpListener, sync::Arc, thread::JoinHandle};',
+                  'mod revision_views;\nmod route_forms;\nmod route_simulator;\n\nuse std::{\n    io,\n    net::TcpListener as StdTcpListener,\n    path::PathBuf,\n    sync::Arc,\n    thread::JoinHandle,\n};'
+              ),
+              ('    extract::State,', '    extract::{Query, State},'),
+              (
+                  'use route_forms::RouteForm;\nuse route_simulator::RouteMatchForm;',
+                  'use revision_views::DiffQuery;\nuse route_forms::RouteForm;\nuse route_simulator::RouteMatchForm;'
+              ),
+              (
+                  'struct AdminState {\n    runtime: Arc<RuntimeStatus>,\n}',
+                  'struct AdminState {\n    runtime: Arc<RuntimeStatus>,\n    config_path: Option<PathBuf>,\n}'
+              ),
+              (
+                  'pub fn router_with_status(runtime: Arc<RuntimeStatus>) -> Router {\n    Router::new()',
+                  'pub fn router_with_status(runtime: Arc<RuntimeStatus>) -> Router {\n    build_router(runtime, None)\n}\n\n/// Builds the admin router with access to filesystem-backed revision data.\npub fn router_with_status_and_config_path(\n    runtime: Arc<RuntimeStatus>,\n    config_path: PathBuf,\n) -> Router {\n    build_router(runtime, Some(config_path))\n}\n\nfn build_router(runtime: Arc<RuntimeStatus>, config_path: Option<PathBuf>) -> Router {\n    Router::new()'
+              ),
+              (
+                  '        .route("/admin/routes/simulate", post(simulate_route))\n        .route("/admin/health", get(health))',
+                  '        .route("/admin/routes/simulate", post(simulate_route))\n        .route("/admin/revisions", get(revisions_page))\n        .route("/admin/fragments/config-diff", get(config_diff_fragment))\n        .route("/admin/health", get(health))'
+              ),
+              (
+                  '        .with_state(AdminState { runtime })',
+                  '        .with_state(AdminState {\n            runtime,\n            config_path,\n        })'
+              ),
+              (
+                  'pub fn start_with_status(config: Config, runtime: Arc<RuntimeStatus>) -> io::Result<AdminHandle> {\n    let listen = config.admin.listen.clone();',
+                  'pub fn start_with_status(config: Config, runtime: Arc<RuntimeStatus>) -> io::Result<AdminHandle> {\n    start_with_status_internal(config, runtime, None)\n}\n\n/// Starts the admin listener with access to filesystem-backed revision data.\npub fn start_with_status_and_config_path(\n    config: Config,\n    runtime: Arc<RuntimeStatus>,\n    config_path: PathBuf,\n) -> io::Result<AdminHandle> {\n    start_with_status_internal(config, runtime, Some(config_path))\n}\n\nfn start_with_status_internal(\n    config: Config,\n    runtime: Arc<RuntimeStatus>,\n    config_path: Option<PathBuf>,\n) -> io::Result<AdminHandle> {\n    let listen = config.admin.listen.clone();'
+              ),
+              (
+                  '                axum::serve(listener, router_with_status(runtime))',
+                  '                axum::serve(listener, build_router(runtime, config_path))'
+              ),
+              (
+                  'async fn upstream_health_fragment(State(state): State<AdminState>) -> Response {',
+                  'async fn revisions_page(State(state): State<AdminState>) -> Response {\n    render_revision_result(\n        revision_views::render_revisions(state.config_path.as_deref()),\n        "revisions page",\n    )\n}\n\nasync fn config_diff_fragment(\n    State(state): State<AdminState>,\n    Query(query): Query<DiffQuery>,\n) -> Response {\n    render_revision_result(\n        revision_views::render_diff(state.config_path.as_deref(), query),\n        "config diff",\n    )\n}\n\nasync fn upstream_health_fragment(State(state): State<AdminState>) -> Response {'
+              ),
+              (
+                  'fn render_template(template: &impl Template, label: &str) -> Response {\n    render_html_result(template.render(), label)\n}\n\nfn render_html_result',
+                  'fn render_template(template: &impl Template, label: &str) -> Response {\n    render_html_result(template.render(), label)\n}\n\nfn render_revision_result(result: Result<String, String>, label: &str) -> Response {\n    match result {\n        Ok(html) => Html(html).into_response(),\n        Err(error) => {\n            log::error!("failed to render admin {label}: {error}");\n            (\n                StatusCode::INTERNAL_SERVER_ERROR,\n                "failed to render admin view\\n",\n            )\n                .into_response()\n        }\n    }\n}\n\nfn render_html_result'
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one anchor, found {count}: {old[:80]!r}')
+              text = text.replace(old, new)
+
+          path.write_text(text)
+          PY
+          cargo fmt --all
+      - name: Commit codemod and remove workflow
+        run: |
+          rm .github/workflows/codemod-admin-revisions.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: wire admin revision views"
+          git push origin HEAD:feat/admin-config-revisions
