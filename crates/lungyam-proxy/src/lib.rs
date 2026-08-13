@@ -15,8 +15,8 @@ use http::{HeaderName, HeaderValue};
 use lungyam_core::{
     PROJECT_NAME,
     config::{Config, HeaderTransform, RouteConfig},
-    routing::route_matches,
-    runtime::{RuntimeConfigSnapshot, RuntimeStatus},
+    routing::{route_matches, sort_routes},
+    runtime::RuntimeStatus,
 };
 use pingora::{
     http::{RequestHeader, ResponseHeader},
@@ -33,7 +33,6 @@ use pingora::{
 #[derive(Debug)]
 pub struct RequestContext {
     route_index: Option<usize>,
-    config: Option<RuntimeConfigSnapshot>,
     request_id: String,
     started: Instant,
     connect_failures: usize,
@@ -70,37 +69,27 @@ type UpstreamHealthService = GenBackgroundService<LoadBalancer<RoundRobin>>;
 
 /// Configuration-driven Lungyam gateway.
 pub struct Gateway {
-    runtime: Arc<RuntimeStatus>,
+    config: Config,
     clusters: BTreeMap<String, UpstreamCluster>,
     rate_limits: Mutex<BTreeMap<String, WindowCounter>>,
     request_sequence: AtomicU64,
 }
 
 impl Gateway {
-    /// Creates a gateway with an independently owned runtime snapshot source.
+    /// Creates a gateway and pre-orders routes by priority and specificity.
     #[must_use]
-    pub fn new(config: Config, clusters: BTreeMap<String, UpstreamCluster>) -> Self {
-        let runtime = Arc::new(RuntimeStatus::from_config(&config));
-        Self::with_runtime(runtime, clusters)
-    }
+    pub fn new(mut config: Config, clusters: BTreeMap<String, UpstreamCluster>) -> Self {
+        sort_routes(&mut config.routes);
 
-    fn with_runtime(
-        runtime: Arc<RuntimeStatus>,
-        clusters: BTreeMap<String, UpstreamCluster>,
-    ) -> Self {
         Self {
-            runtime,
+            config,
             clusters,
             rate_limits: Mutex::new(BTreeMap::new()),
             request_sequence: AtomicU64::new(1),
         }
     }
 
-    fn route_index(
-        &self,
-        session: &Session,
-        config: &RuntimeConfigSnapshot,
-    ) -> Option<usize> {
+    fn route_index(&self, session: &Session) -> Option<usize> {
         let request = session.req_header();
         let host = request
             .headers
@@ -109,26 +98,16 @@ impl Gateway {
         let path = request.uri.path();
         let method = request.method.as_str();
 
-        config
-            .routes()
+        self.config
+            .routes
             .iter()
             .position(|route| route_matches(route, host, path, method))
     }
 
-    fn route<'a>(&self, ctx: &'a RequestContext) -> &'a RouteConfig {
-        &ctx.config
-            .as_ref()
-            .expect("request filter must pin a runtime config before proxying")
-            .routes()[ctx
+    fn route<'a>(&'a self, ctx: &RequestContext) -> &'a RouteConfig {
+        &self.config.routes[ctx
             .route_index
             .expect("request filter must select a route before proxying")]
-    }
-
-    fn active_config<'a>(&self, ctx: &'a RequestContext) -> &'a Config {
-        ctx.config
-            .as_ref()
-            .expect("request filter must pin a runtime config before proxying")
-            .config()
     }
 
     fn allow_request(&self, route: &RouteConfig) -> bool {
@@ -161,7 +140,7 @@ impl Gateway {
 
     fn can_retry_connect(&self, ctx: &RequestContext) -> bool {
         let route = self.route(ctx);
-        self.active_config(ctx)
+        self.config
             .upstreams
             .get(&route.upstream)
             .is_some_and(|upstream| ctx.connect_failures < upstream.endpoints.len())
@@ -176,7 +155,6 @@ impl ProxyHttp for Gateway {
         let sequence = self.request_sequence.fetch_add(1, Ordering::Relaxed);
         RequestContext {
             route_index: None,
-            config: None,
             request_id: format!("ly-{sequence}"),
             started: Instant::now(),
             connect_failures: 0,
@@ -191,14 +169,12 @@ impl ProxyHttp for Gateway {
             return Ok(true);
         }
 
-        let config = self.runtime.config_snapshot();
-        let Some(route_index) = self.route_index(session, &config) else {
+        let Some(route_index) = self.route_index(session) else {
             session
                 .respond_error_with_body(404, Bytes::from_static(b"route not found\n"))
                 .await?;
             return Ok(true);
         };
-        ctx.config = Some(config);
         ctx.route_index = Some(route_index);
 
         let route = self.route(ctx);
@@ -234,7 +210,7 @@ impl ProxyHttp for Gateway {
     ) -> Result<Box<HttpPeer>> {
         let route = self.route(ctx);
         let upstream = self
-            .active_config(ctx)
+            .config
             .upstreams
             .get(&route.upstream)
             .expect("configuration validation guarantees upstream references");
@@ -324,12 +300,7 @@ impl ProxyHttp for Gateway {
             .map_or(0, |response| response.status.as_u16());
         let route = ctx
             .route_index
-            .and_then(|index| {
-                ctx.config
-                    .as_ref()
-                    .and_then(|config| config.routes().get(index))
-            })
-            .map_or("-", |route| route.name.as_str());
+            .map_or("-", |index| self.config.routes[index].name.as_str());
         log::info!(
             "request_id={} route={} method={} path={} status={} latency_ms={} connect_failures={} error={}",
             ctx.request_id,
@@ -417,8 +388,7 @@ pub fn run_with_status(config: Config, runtime: Arc<RuntimeStatus>) {
     let mut server = Server::new(None).expect("failed to create Pingora server");
     server.bootstrap();
 
-    let gateway = Gateway::with_runtime(Arc::clone(&runtime), clusters);
-    let mut service = http_proxy_service(&server.configuration, gateway);
+    let mut service = http_proxy_service(&server.configuration, Gateway::new(config, clusters));
     service.add_tcp(&listen);
     server.add_service(service);
     for health_service in health_services {
@@ -433,77 +403,4 @@ pub fn run_with_status(config: Config, runtime: Arc<RuntimeStatus>) {
 #[must_use]
 pub fn runtime_banner() -> String {
     format!("{PROJECT_NAME} proxy")
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{collections::BTreeMap, sync::Arc, time::Instant};
-
-    use lungyam_core::{
-        config::{AdminConfig, Config, RouteConfig, RoutePolicies, ServerConfig, UpstreamConfig},
-        runtime::RuntimeStatus,
-    };
-
-    use super::{Gateway, RequestContext};
-
-    #[test]
-    fn request_context_keeps_pinned_route_snapshot_across_hot_reload() {
-        let config = test_config();
-        let runtime = Arc::new(RuntimeStatus::from_config(&config));
-        let gateway = Gateway::with_runtime(Arc::clone(&runtime), BTreeMap::new());
-        let mut context = RequestContext {
-            route_index: Some(0),
-            config: Some(runtime.config_snapshot()),
-            request_id: "test".to_owned(),
-            started: Instant::now(),
-            connect_failures: 0,
-        };
-
-        assert_eq!(gateway.route(&context).name, "api");
-
-        let mut candidate = config.clone();
-        candidate.routes[0].name = "api-v2".to_owned();
-        candidate.routes[0].path = "/v2".to_owned();
-        runtime
-            .apply_route_config(&candidate)
-            .expect("route-only config should hot apply");
-
-        assert_eq!(gateway.route(&context).name, "api");
-        context.config = Some(runtime.config_snapshot());
-        assert_eq!(gateway.route(&context).name, "api-v2");
-    }
-
-    fn test_config() -> Config {
-        let mut upstreams = BTreeMap::new();
-        upstreams.insert(
-            "api".to_owned(),
-            UpstreamConfig {
-                endpoints: vec!["127.0.0.1:3000".to_owned()],
-                connect_timeout_ms: None,
-                read_timeout_ms: None,
-                write_timeout_ms: None,
-                health_check_interval_seconds: 5,
-            },
-        );
-        Config {
-            server: ServerConfig {
-                listen: "127.0.0.1:8080".to_owned(),
-            },
-            admin: AdminConfig {
-                enabled: true,
-                listen: "127.0.0.1:9090".to_owned(),
-                read_only: true,
-            },
-            upstreams,
-            routes: vec![RouteConfig {
-                name: "api".to_owned(),
-                host: None,
-                path: "/".to_owned(),
-                methods: Vec::new(),
-                upstream: "api".to_owned(),
-                priority: 0,
-                policies: RoutePolicies::default(),
-            }],
-        }
-    }
 }
