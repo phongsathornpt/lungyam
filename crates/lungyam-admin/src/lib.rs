@@ -40,6 +40,12 @@ struct DashboardTemplate {
     endpoint_health: Vec<EndpointHealthView>,
 }
 
+#[derive(Template)]
+#[template(path = "fragments/upstream-health.html")]
+struct UpstreamHealthTemplate {
+    endpoint_health: Vec<EndpointHealthView>,
+}
+
 /// Handle that keeps ownership of the admin server thread.
 #[derive(Debug)]
 pub struct AdminHandle {
@@ -57,7 +63,12 @@ pub fn router_with_status(runtime: Arc<RuntimeStatus>) -> Router {
     Router::new()
         .route("/admin", get(dashboard))
         .route("/admin/health", get(health))
+        .route(
+            "/admin/fragments/upstream-health",
+            get(upstream_health_fragment),
+        )
         .route("/admin/assets/lungyam.css", get(stylesheet))
+        .route("/admin/assets/htmx.min.js", get(htmx_asset))
         .with_state(AdminState { runtime })
 }
 
@@ -97,27 +108,28 @@ pub fn start_with_status(config: Config, runtime: Arc<RuntimeStatus>) -> io::Res
 async fn dashboard(State(state): State<AdminState>) -> Response {
     let snapshot = state.runtime.snapshot();
     let active = snapshot.active_config;
-    let template = DashboardTemplate {
-        proxy_listen: active.proxy_listen,
-        admin_listen: active.admin_listen,
-        route_count: active.route_count,
-        upstream_count: active.upstream_count,
-        endpoint_count: active.endpoint_count,
-        uptime: format_uptime(snapshot.uptime_seconds),
-        endpoint_health: health_views(snapshot.endpoint_health),
-    };
+    render_template(
+        &DashboardTemplate {
+            proxy_listen: active.proxy_listen,
+            admin_listen: active.admin_listen,
+            route_count: active.route_count,
+            upstream_count: active.upstream_count,
+            endpoint_count: active.endpoint_count,
+            uptime: format_uptime(snapshot.uptime_seconds),
+            endpoint_health: health_views(snapshot.endpoint_health),
+        },
+        "dashboard",
+    )
+}
 
-    match template.render() {
-        Ok(html) => Html(html).into_response(),
-        Err(error) => {
-            log::error!("failed to render admin dashboard: {error}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "failed to render dashboard\n",
-            )
-                .into_response()
-        }
-    }
+async fn upstream_health_fragment(State(state): State<AdminState>) -> Response {
+    let snapshot = state.runtime.snapshot();
+    render_template(
+        &UpstreamHealthTemplate {
+            endpoint_health: health_views(snapshot.endpoint_health),
+        },
+        "upstream health fragment",
+    )
 }
 
 async fn health() -> &'static str {
@@ -129,6 +141,27 @@ async fn stylesheet() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
         include_str!("../static/lungyam.css"),
     )
+}
+
+async fn htmx_asset() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+        include_str!("../vendor/htmx.min.js"),
+    )
+}
+
+fn render_template(template: &impl Template, label: &str) -> Response {
+    match template.render() {
+        Ok(html) => Html(html).into_response(),
+        Err(error) => {
+            log::error!("failed to render admin {label}: {error}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to render admin view\n",
+            )
+                .into_response()
+        }
+    }
 }
 
 fn health_views(endpoints: Vec<EndpointHealth>) -> Vec<EndpointHealthView> {
@@ -172,7 +205,7 @@ mod tests {
     use askama::Template;
     use axum::{
         body::Body,
-        http::{Request, StatusCode},
+        http::{Request, StatusCode, header},
     };
     use lungyam_core::{
         config::{AdminConfig, Config, RouteConfig, RoutePolicies, ServerConfig, UpstreamConfig},
@@ -183,7 +216,7 @@ mod tests {
     use super::{DashboardTemplate, format_uptime, health_views, router_with_status};
 
     #[test]
-    fn dashboard_template_renders_runtime_summary_and_health() {
+    fn dashboard_template_renders_runtime_summary_health_and_htmx_contract() {
         let status = RuntimeStatus::from_config(&test_config());
         status.set_endpoint_health("api", "127.0.0.1:3001", false);
         let snapshot = status.snapshot();
@@ -207,6 +240,14 @@ mod tests {
         assert!(html.contains("Uptime"));
         assert!(html.contains("127.0.0.1:3001"));
         assert!(html.contains("Unhealthy"));
+        assert!(html.contains("/admin/assets/htmx.min.js"));
+        assert!(html.contains("hx-get=\"/admin/fragments/upstream-health\""));
+        assert!(html.contains("hx-trigger=\"every 5s\""));
+    }
+
+    #[test]
+    fn vendored_htmx_is_pinned_to_expected_version() {
+        assert!(include_str!("../vendor/htmx.min.js").contains("version:\"2.0.10\""));
     }
 
     #[test]
@@ -218,6 +259,7 @@ mod tests {
 
         runtime.block_on(async {
             let status = Arc::new(RuntimeStatus::from_config(&test_config()));
+            status.set_endpoint_health("api", "127.0.0.1:3001", false);
             let app = router_with_status(status);
 
             let health = app
@@ -231,6 +273,36 @@ mod tests {
                 .await
                 .expect("health response");
             assert_eq!(health.status(), StatusCode::OK);
+
+            let htmx = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/admin/assets/htmx.min.js")
+                        .body(Body::empty())
+                        .expect("htmx request"),
+                )
+                .await
+                .expect("htmx response");
+            assert_eq!(htmx.status(), StatusCode::OK);
+            assert_eq!(
+                htmx.headers()
+                    .get(header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok()),
+                Some("text/javascript; charset=utf-8")
+            );
+
+            let fragment = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/admin/fragments/upstream-health")
+                        .body(Body::empty())
+                        .expect("fragment request"),
+                )
+                .await
+                .expect("fragment response");
+            assert_eq!(fragment.status(), StatusCode::OK);
 
             let dashboard = app
                 .oneshot(
