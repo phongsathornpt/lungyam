@@ -9,12 +9,7 @@ pub fn sort_routes(routes: &mut [RouteConfig]) {
 
 /// Returns whether a route matches an incoming host, path, and method.
 #[must_use]
-pub fn route_matches(
-    route: &RouteConfig,
-    host: Option<&str>,
-    path: &str,
-    method: &str,
-) -> bool {
+pub fn route_matches(route: &RouteConfig, host: Option<&str>, path: &str, method: &str) -> bool {
     host_matches(route.host.as_deref(), host)
         && path_matches(&route.path, path)
         && (route.methods.is_empty()
@@ -108,8 +103,8 @@ mod tests {
             route("lower", None, "/api/users", &[], 50),
         ];
 
-        let matched = find_matching_route(&routes, None, "/api/users", "GET")
-            .expect("a route should match");
+        let matched =
+            find_matching_route(&routes, None, "/api/users", "GET").expect("a route should match");
         assert_eq!(matched.name, "specific");
     }
 
