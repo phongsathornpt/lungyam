@@ -1,0 +1,27 @@
+<section class="panel panel-spaced" id="validate-upstream">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Upstreams</p>
+      <h2>Validate candidate</h2>
+      <p class="muted">Validation uses the full Lungyam configuration rules. It does not create a revision or change runtime state.</p>
+    </div>
+  </div>
+  <form class="route-form" method="post" action="/admin/routes/stage" hx-post="/admin/routes/stage" hx-target="#upstream-validation-result" hx-swap="innerHTML">
+    <input name="operation" type="hidden" value="validate-upstream">
+    <input name="name" type="hidden" value="_upstream_candidate">
+    <input name="path" type="hidden" value="/">
+    <input name="upstream" type="hidden" value="_unused">
+    <div class="form-grid">
+      <label class="field"><span>Name</span><input name="upstream_name" type="text" required placeholder="canary"></label>
+      <label class="field"><span>Endpoints</span><textarea name="endpoints" rows="4" required placeholder="127.0.0.1:4000&#10;127.0.0.1:4001"></textarea></label>
+      <label class="field"><span>Connect timeout (ms)</span><input name="connect_timeout" type="text" placeholder="Default"></label>
+      <label class="field"><span>Read timeout (ms)</span><input name="read_timeout" type="text" placeholder="Default"></label>
+      <label class="field"><span>Write timeout (ms)</span><input name="write_timeout" type="text" placeholder="Default"></label>
+      <label class="field"><span>Health check interval (s)</span><input name="health_check_interval" type="number" min="1" required value="5"></label>
+    </div>
+    <div class="form-actions">
+      <button class="button button-secondary" type="submit">Validate upstream</button>
+    </div>
+  </form>
+  <div id="upstream-validation-result" class="validation-slot panel-spaced" aria-live="polite"><div class="validation-card validation-neutral">No candidate validated yet.</div></div>
+</section>
