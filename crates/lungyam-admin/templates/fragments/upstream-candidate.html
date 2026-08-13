@@ -3,11 +3,12 @@
     <div>
       <p class="eyebrow">Upstreams</p>
       <h2>Validate candidate</h2>
-      <p class="muted">Validation uses the full Lungyam configuration rules. It does not create a revision or change runtime state.</p>
+      <p class="muted">Validation uses the full Lungyam configuration rules. Staging creates a pending revision only; runtime state remains unchanged.</p>
     </div>
   </div>
   <form class="route-form">
     <input name="operation" type="hidden" value="validate-upstream">
+    <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
     <input name="name" type="hidden" value="_upstream_candidate">
     <input name="path" type="hidden" value="/">
     <input name="upstream" type="hidden" value="_unused">
@@ -28,6 +29,20 @@
         hx-target="#upstream-validation-result"
         hx-swap="innerHTML"
       >Validate upstream</button>
+      {% if writes_enabled %}
+      <button
+        class="button"
+        type="button"
+        hx-post="/admin/routes/stage"
+        hx-include="closest form"
+        hx-vals='{"operation":"stage-upstream-create"}'
+        hx-target="#upstream-validation-result"
+        hx-swap="innerHTML"
+      >Stage upstream create</button>
+      <span class="muted">Creates a pending revision for review. Restart is required after activation.</span>
+      {% else %}
+      <span class="muted">Admin writes are disabled. Upstream validation remains available.</span>
+      {% endif %}
     </div>
   </form>
   <div id="upstream-validation-result" class="validation-slot panel-spaced" aria-live="polite"><div class="validation-card validation-neutral">No candidate validated yet.</div></div>
