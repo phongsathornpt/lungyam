@@ -5,6 +5,7 @@ mod route_forms;
 mod route_simulator;
 mod route_stage;
 mod security;
+mod upstream_stage;
 
 use std::{io, net::TcpListener as StdTcpListener, path::PathBuf, sync::Arc, thread::JoinHandle};
 
@@ -115,6 +116,10 @@ fn build_router(runtime: Arc<RuntimeStatus>, config_path: Option<PathBuf>) -> Ro
         .route("/admin/routes/validate", post(validate_route))
         .route("/admin/routes/stage", post(route_stage::stage_route))
         .route("/admin/routes/simulate", post(simulate_route))
+        .route(
+            "/admin/upstreams/stage-create",
+            post(upstream_stage::stage_create),
+        )
         .route("/admin/revisions", get(revisions_page))
         .route("/admin/fragments/config-diff", get(config_diff_fragment))
         .route("/admin/health", get(health))
