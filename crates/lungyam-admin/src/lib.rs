@@ -89,7 +89,11 @@ async fn dashboard(State(state): State<AdminState>) -> Response {
         Ok(html) => Html(html).into_response(),
         Err(error) => {
             log::error!("failed to render admin dashboard: {error}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "failed to render dashboard\n").into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to render dashboard\n",
+            )
+                .into_response()
         }
     }
 }
