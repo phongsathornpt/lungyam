@@ -4,6 +4,8 @@ use std::{
     time::Instant,
 };
 
+use thiserror::Error;
+
 use crate::{
     config::{Config, RouteConfig},
     routing::sort_routes,
@@ -33,11 +35,18 @@ pub struct RuntimeSnapshot {
     pub endpoint_health: Vec<EndpointHealth>,
 }
 
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum RuntimeConfigApplyError {
+    #[error("candidate runtime config is invalid: {0}")]
+    InvalidConfig(String),
+    #[error("runtime route reload does not support server, admin, or upstream changes")]
+    StructuralChange,
+}
+
 /// Immutable handle to the configuration currently owned by the runtime.
 ///
 /// Cloning this value is cheap and keeps the underlying configuration alive
-/// without exposing mutation. A later hot-reload implementation can atomically
-/// replace the handle while existing readers continue using their snapshot.
+/// while a newer snapshot is installed for subsequent requests.
 #[derive(Clone, Debug)]
 pub struct RuntimeConfigSnapshot {
     config: Arc<Config>,
@@ -72,19 +81,13 @@ impl RuntimeConfigSnapshot {
 #[derive(Debug)]
 pub struct RuntimeStatus {
     started_at: Instant,
-    active_config: ActiveConfigSummary,
-    config: RuntimeConfigSnapshot,
+    config: RwLock<RuntimeConfigSnapshot>,
     endpoint_health: RwLock<BTreeMap<(String, String), bool>>,
 }
 
 impl RuntimeStatus {
     #[must_use]
     pub fn from_config(config: &Config) -> Self {
-        let endpoint_count = config
-            .upstreams
-            .values()
-            .map(|upstream| upstream.endpoints.len())
-            .sum();
         let endpoint_health = config
             .upstreams
             .iter()
@@ -98,15 +101,7 @@ impl RuntimeStatus {
 
         Self {
             started_at: Instant::now(),
-            active_config: ActiveConfigSummary {
-                proxy_listen: config.server.listen.clone(),
-                admin_listen: config.admin.listen.clone(),
-                admin_read_only: config.admin.read_only,
-                route_count: config.routes.len(),
-                upstream_count: config.upstreams.len(),
-                endpoint_count,
-            },
-            config: RuntimeConfigSnapshot::from_config(config),
+            config: RwLock::new(RuntimeConfigSnapshot::from_config(config)),
             endpoint_health: RwLock::new(endpoint_health),
         }
     }
@@ -119,26 +114,55 @@ impl RuntimeStatus {
         states.insert((upstream.to_owned(), endpoint.to_owned()), healthy);
     }
 
+    /// Replaces route matching and route policy configuration for subsequent requests.
+    ///
+    /// Listener and upstream changes remain restart-required because Pingora services,
+    /// load balancers, and health-check workers are built during process startup.
+    pub fn apply_route_config(&self, candidate: &Config) -> Result<(), RuntimeConfigApplyError> {
+        candidate
+            .validate()
+            .map_err(|error| RuntimeConfigApplyError::InvalidConfig(error.to_string()))?;
+
+        let current = self.config_snapshot();
+        if candidate.server != current.config().server
+            || candidate.admin != current.config().admin
+            || candidate.upstreams != current.config().upstreams
+        {
+            return Err(RuntimeConfigApplyError::StructuralChange);
+        }
+
+        let mut active = self
+            .config
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *active = RuntimeConfigSnapshot::from_config(candidate);
+        Ok(())
+    }
+
     /// Returns a cheap immutable handle to the currently active runtime configuration.
     #[must_use]
     pub fn config_snapshot(&self) -> RuntimeConfigSnapshot {
-        self.config.clone()
+        self.config
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Returns the currently active configuration snapshot as an owned value.
     #[must_use]
     pub fn config(&self) -> Config {
-        self.config.config().clone()
+        self.config_snapshot().config().clone()
     }
 
     /// Returns the currently active route configuration snapshot in proxy evaluation order.
     #[must_use]
     pub fn routes(&self) -> Vec<RouteConfig> {
-        self.config.routes().to_vec()
+        self.config_snapshot().routes().to_vec()
     }
 
     #[must_use]
     pub fn snapshot(&self) -> RuntimeSnapshot {
+        let config = self.config_snapshot();
         let endpoint_health = self
             .endpoint_health
             .read()
@@ -153,9 +177,24 @@ impl RuntimeStatus {
 
         RuntimeSnapshot {
             uptime_seconds: self.started_at.elapsed().as_secs(),
-            active_config: self.active_config.clone(),
+            active_config: active_config_summary(config.config()),
             endpoint_health,
         }
+    }
+}
+
+fn active_config_summary(config: &Config) -> ActiveConfigSummary {
+    ActiveConfigSummary {
+        proxy_listen: config.server.listen.clone(),
+        admin_listen: config.admin.listen.clone(),
+        admin_read_only: config.admin.read_only,
+        route_count: config.routes.len(),
+        upstream_count: config.upstreams.len(),
+        endpoint_count: config
+            .upstreams
+            .values()
+            .map(|upstream| upstream.endpoints.len())
+            .sum(),
     }
 }
 
@@ -167,7 +206,7 @@ mod tests {
         AdminConfig, Config, RouteConfig, RoutePolicies, ServerConfig, UpstreamConfig,
     };
 
-    use super::RuntimeStatus;
+    use super::{RuntimeConfigApplyError, RuntimeStatus};
 
     #[test]
     fn captures_config_and_tracks_endpoint_health() {
@@ -246,6 +285,48 @@ mod tests {
         assert_eq!(snapshot.routes()[1].name, "higher");
         assert_eq!(snapshot.routes()[2].name, "lower");
         assert_eq!(snapshot.config().routes[0].name, "lower");
+    }
+
+    #[test]
+    fn route_config_apply_swaps_future_snapshots_and_preserves_pinned_readers() {
+        let config = test_config();
+        let status = RuntimeStatus::from_config(&config);
+        let pinned = status.config_snapshot();
+
+        let mut candidate = config.clone();
+        let mut second = candidate.routes[0].clone();
+        second.name = "api-v2".to_owned();
+        second.path = "/v2".to_owned();
+        second.priority = 100;
+        candidate.routes.push(second);
+
+        status
+            .apply_route_config(&candidate)
+            .expect("route-only config should hot apply");
+
+        assert_eq!(pinned.routes().len(), 1);
+        assert_eq!(status.config_snapshot().routes().len(), 2);
+        assert_eq!(status.config_snapshot().routes()[0].name, "api-v2");
+        assert_eq!(status.snapshot().active_config.route_count, 2);
+    }
+
+    #[test]
+    fn route_config_apply_rejects_structural_changes_without_replacing_active_snapshot() {
+        let config = test_config();
+        let status = RuntimeStatus::from_config(&config);
+        let mut candidate = config.clone();
+        candidate
+            .upstreams
+            .get_mut("api")
+            .expect("api upstream")
+            .endpoints
+            .push("127.0.0.1:3002".to_owned());
+
+        assert_eq!(
+            status.apply_route_config(&candidate),
+            Err(RuntimeConfigApplyError::StructuralChange)
+        );
+        assert_eq!(status.config(), config);
     }
 
     fn test_config() -> Config {
