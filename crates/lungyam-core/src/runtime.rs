@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, sync::RwLock, time::Instant};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, RwLock},
+    time::Instant,
+};
 
 use crate::config::{Config, RouteConfig};
 
@@ -26,12 +30,41 @@ pub struct RuntimeSnapshot {
     pub endpoint_health: Vec<EndpointHealth>,
 }
 
+/// Immutable handle to the configuration currently owned by the runtime.
+///
+/// Cloning this value is cheap and keeps the underlying configuration alive
+/// without exposing mutation. A later hot-reload implementation can atomically
+/// replace the handle while existing readers continue using their snapshot.
+#[derive(Clone, Debug)]
+pub struct RuntimeConfigSnapshot {
+    config: Arc<Config>,
+}
+
+impl RuntimeConfigSnapshot {
+    #[must_use]
+    pub fn from_config(config: &Config) -> Self {
+        Self {
+            config: Arc::new(config.clone()),
+        }
+    }
+
+    #[must_use]
+    pub fn config(&self) -> &Config {
+        self.config.as_ref()
+    }
+
+    #[must_use]
+    pub fn routes(&self) -> &[RouteConfig] {
+        &self.config.routes
+    }
+}
+
 /// Shared runtime state written by the data plane and read by control-plane adapters.
 #[derive(Debug)]
 pub struct RuntimeStatus {
     started_at: Instant,
     active_config: ActiveConfigSummary,
-    config: Config,
+    config: RuntimeConfigSnapshot,
     endpoint_health: RwLock<BTreeMap<(String, String), bool>>,
 }
 
@@ -64,7 +97,7 @@ impl RuntimeStatus {
                 upstream_count: config.upstreams.len(),
                 endpoint_count,
             },
-            config: config.clone(),
+            config: RuntimeConfigSnapshot::from_config(config),
             endpoint_health: RwLock::new(endpoint_health),
         }
     }
@@ -77,16 +110,22 @@ impl RuntimeStatus {
         states.insert((upstream.to_owned(), endpoint.to_owned()), healthy);
     }
 
-    /// Returns the currently active configuration snapshot.
+    /// Returns a cheap immutable handle to the currently active runtime configuration.
     #[must_use]
-    pub fn config(&self) -> Config {
+    pub fn config_snapshot(&self) -> RuntimeConfigSnapshot {
         self.config.clone()
     }
 
-    /// Returns the currently active route configuration snapshot.
+    /// Returns the currently active configuration snapshot as an owned value.
+    #[must_use]
+    pub fn config(&self) -> Config {
+        self.config.config().clone()
+    }
+
+    /// Returns the currently active route configuration snapshot as owned values.
     #[must_use]
     pub fn routes(&self) -> Vec<RouteConfig> {
-        self.config.routes.clone()
+        self.config.routes().to_vec()
     }
 
     #[must_use]
@@ -155,6 +194,22 @@ mod tests {
             .find(|endpoint| endpoint.endpoint == "127.0.0.1:3001")
             .expect("configured endpoint should exist");
         assert!(!failed.healthy);
+    }
+
+    #[test]
+    fn config_snapshot_is_immutable_and_independent_from_source_config() {
+        let mut source = test_config();
+        let status = RuntimeStatus::from_config(&source);
+        let first = status.config_snapshot();
+        let second = first.clone();
+
+        source.routes.clear();
+        source.upstreams.clear();
+
+        assert_eq!(first.config().routes.len(), 1);
+        assert_eq!(first.config().upstreams.len(), 1);
+        assert!(std::ptr::eq(first.config(), second.config()));
+        assert_eq!(second.routes()[0].name, "api");
     }
 
     fn test_config() -> Config {
