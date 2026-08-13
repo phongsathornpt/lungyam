@@ -39,6 +39,7 @@ pub fn router(config: Config) -> Router {
         .route("/admin", get(dashboard))
         .route("/admin/health", get(health))
         .route("/admin/assets/lungyam.css", get(stylesheet))
+        .route("/admin/assets/htmx.min.js", get(htmx))
         .with_state(AdminState { config })
 }
 
@@ -108,6 +109,16 @@ async fn stylesheet() -> impl IntoResponse {
     )
 }
 
+async fn htmx() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "text/javascript; charset=utf-8",
+        )],
+        include_str!("../vendor/htmx.min.js"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -115,7 +126,7 @@ mod tests {
     use askama::Template;
     use axum::{
         body::Body,
-        http::{Request, StatusCode},
+        http::{Request, StatusCode, header},
     };
     use lungyam_core::config::{
         AdminConfig, Config, RouteConfig, RoutePolicies, ServerConfig, UpstreamConfig,
@@ -145,6 +156,7 @@ mod tests {
         assert!(html.contains("127.0.0.1:9090"));
         assert!(html.contains(">1<"));
         assert!(html.contains(">2<"));
+        assert!(html.contains("/admin/assets/htmx.min.js"));
     }
 
     #[test]
@@ -168,6 +180,22 @@ mod tests {
                 .await
                 .expect("health response");
             assert_eq!(health.status(), StatusCode::OK);
+
+            let htmx = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/admin/assets/htmx.min.js")
+                        .body(Body::empty())
+                        .expect("htmx request"),
+                )
+                .await
+                .expect("htmx response");
+            assert_eq!(htmx.status(), StatusCode::OK);
+            assert_eq!(
+                htmx.headers().get(header::CONTENT_TYPE).and_then(|value| value.to_str().ok()),
+                Some("text/javascript; charset=utf-8")
+            );
 
             let dashboard = app
                 .oneshot(
