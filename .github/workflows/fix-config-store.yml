@@ -1,0 +1,137 @@
+name: Harden config store
+
+on:
+  push:
+    branches:
+      - feat/config-store
+    paths:
+      - .github/workflows/fix-config-store.yml
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply store cleanup and rustfmt
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/lungyam-core/src/store.rs")
+          text = path.read_text()
+          old = '''fn atomic_replace(path: &Path, contents: &[u8]) -> io::Result<()> {
+              let parent = path
+                  .parent()
+                  .filter(|parent| !parent.as_os_str().is_empty())
+                  .unwrap_or_else(|| Path::new("."));
+              let file_name = path.file_name().ok_or_else(|| {
+                  io::Error::new(io::ErrorKind::InvalidInput, "config path has no file name")
+              })?;
+              let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+              let temp_path = parent.join(format!(
+                  ".{}.tmp-{}-{sequence}",
+                  file_name.to_string_lossy(),
+                  std::process::id()
+              ));
+
+              let result = (|| {
+                  let mut temp = OpenOptions::new()
+                      .write(true)
+                      .create_new(true)
+                      .open(&temp_path)?;
+                  temp.write_all(contents)?;
+                  temp.flush()?;
+                  temp.sync_all()?;
+
+                  if let Ok(metadata) = fs::metadata(path) {
+                      fs::set_permissions(&temp_path, metadata.permissions())?;
+                  }
+
+                  fs::rename(&temp_path, path)?;
+                  sync_parent_directory(parent)?;
+                  Ok(())
+              })();
+
+              if result.is_err() {
+                  let _ = fs::remove_file(&temp_path);
+              }
+
+              result
+          }
+          '''
+          new = '''fn atomic_replace(path: &Path, contents: &[u8]) -> io::Result<()> {
+              let parent = path
+                  .parent()
+                  .filter(|parent| !parent.as_os_str().is_empty())
+                  .unwrap_or_else(|| Path::new("."));
+              let file_name = path.file_name().ok_or_else(|| {
+                  io::Error::new(io::ErrorKind::InvalidInput, "config path has no file name")
+              })?;
+              let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+              let temp_path = parent.join(format!(
+                  ".{}.tmp-{}-{sequence}",
+                  file_name.to_string_lossy(),
+                  std::process::id()
+              ));
+
+              let result = write_and_replace(path, parent, &temp_path, contents);
+              if result.is_err() {
+                  let _ = fs::remove_file(&temp_path);
+              }
+              result
+          }
+
+          fn write_and_replace(
+              path: &Path,
+              parent: &Path,
+              temp_path: &Path,
+              contents: &[u8],
+          ) -> io::Result<()> {
+              let mut temp = OpenOptions::new()
+                  .write(true)
+                  .create_new(true)
+                  .open(temp_path)?;
+              temp.write_all(contents)?;
+              temp.flush()?;
+              temp.sync_all()?;
+              drop(temp);
+
+              if let Ok(metadata) = fs::metadata(path) {
+                  fs::set_permissions(temp_path, metadata.permissions())?;
+              }
+
+              fs::rename(temp_path, path)?;
+              sync_parent_directory(parent)
+          }
+          '''
+          if text.count(old) != 1:
+              raise SystemExit("atomic_replace anchor missing")
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              '        path::PathBuf,\n',
+              '        path::{Path, PathBuf},\n',
+              1,
+          )
+          text = text.replace(
+              '    fn assert_no_temp_files(directory: &PathBuf) {\n',
+              '    fn assert_no_temp_files(directory: &Path) {\n',
+              1,
+          )
+          path.write_text(text)
+          PY
+          cargo fmt --all
+
+      - name: Commit hardened store
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-config-store.yml
+          git add crates/lungyam-core
+          git commit -m "fix: harden atomic config persistence"
+          git push origin HEAD:feat/config-store
