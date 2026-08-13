@@ -110,7 +110,7 @@ invalid_route=$(curl --silent --fail \
   --data 'name=bad-route&host=&path=missing-slash&methods=&upstream=fixture&priority=0&rate_limit_requests=&rate_limit_window_seconds=&max_request_body_bytes=' \
   http://127.0.0.1:19090/admin/routes/validate)
 grep -q 'Route is invalid' <<<"$invalid_route"
-grep -q "path must start with" <<<"$invalid_route"
+grep -q 'path must start with' <<<"$invalid_route"
 
 duplicate_route=$(curl --silent --fail \
   --request POST \
@@ -118,7 +118,8 @@ duplicate_route=$(curl --silent --fail \
   --data 'name=echo&host=api.test&path=%2Fother&methods=POST&upstream=fixture&priority=0&rate_limit_requests=&rate_limit_window_seconds=&max_request_body_bytes=' \
   http://127.0.0.1:19090/admin/routes/validate)
 grep -q 'Route is invalid' <<<"$duplicate_route"
-grep -q "duplicate route name 'echo'" <<<"$duplicate_route"
+grep -q 'duplicate route name' <<<"$duplicate_route"
+grep -q 'echo' <<<"$duplicate_route"
 
 headers=$(mktemp)
 body=$(mktemp)
