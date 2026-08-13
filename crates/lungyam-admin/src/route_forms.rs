@@ -35,12 +35,36 @@ pub(crate) struct RouteForm {
     pub max_request_body_bytes: String,
 }
 
+#[derive(Clone, Debug)]
+struct UpstreamOption {
+    name: String,
+    selected: bool,
+}
+
+#[derive(Clone, Debug)]
+struct ExistingRouteView {
+    name: String,
+    host: String,
+    path: String,
+    methods: String,
+    priority: i32,
+    upstreams: Vec<UpstreamOption>,
+    request_add_headers: String,
+    request_remove_headers: String,
+    response_add_headers: String,
+    response_remove_headers: String,
+    rate_limit_requests: String,
+    rate_limit_window_seconds: String,
+    max_request_body_bytes: String,
+}
+
 #[derive(Template)]
 #[template(path = "route-new.html")]
 struct RouteFormTemplate {
     overview_active: bool,
     routes_active: bool,
     upstreams: Vec<String>,
+    existing_routes: Vec<ExistingRouteView>,
     csrf_token: String,
     writes_enabled: bool,
 }
@@ -54,10 +78,52 @@ struct RouteValidationTemplate {
 }
 
 pub(crate) fn render_new_route(config: &Config) -> askama::Result<String> {
+    let upstreams = config.upstreams.keys().cloned().collect::<Vec<_>>();
+    let existing_routes = config
+        .routes
+        .iter()
+        .map(|route| ExistingRouteView {
+            name: route.name.clone(),
+            host: route.host.clone().unwrap_or_default(),
+            path: route.path.clone(),
+            methods: route.methods.join(", "),
+            priority: route.priority,
+            upstreams: upstreams
+                .iter()
+                .map(|name| UpstreamOption {
+                    name: name.clone(),
+                    selected: *name == route.upstream,
+                })
+                .collect(),
+            request_add_headers: render_added_headers(&route.policies.request_headers),
+            request_remove_headers: route.policies.request_headers.remove.join(", "),
+            response_add_headers: render_added_headers(&route.policies.response_headers),
+            response_remove_headers: route.policies.response_headers.remove.join(", "),
+            rate_limit_requests: route
+                .policies
+                .rate_limit
+                .as_ref()
+                .map(|limit| limit.requests.to_string())
+                .unwrap_or_default(),
+            rate_limit_window_seconds: route
+                .policies
+                .rate_limit
+                .as_ref()
+                .map(|limit| limit.window_seconds.to_string())
+                .unwrap_or_default(),
+            max_request_body_bytes: route
+                .policies
+                .max_request_body_bytes
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+        })
+        .collect();
+
     RouteFormTemplate {
         overview_active: false,
         routes_active: true,
-        upstreams: config.upstreams.keys().cloned().collect(),
+        upstreams,
+        existing_routes,
         csrf_token: security::csrf_token().expose().to_owned(),
         writes_enabled: security::writes_enabled(config),
     }
@@ -93,7 +159,7 @@ pub(crate) fn candidate_config(config: &Config, form: RouteForm) -> Result<Confi
     Ok(candidate_config)
 }
 
-fn candidate_route(form: RouteForm) -> Result<RouteConfig, String> {
+pub(crate) fn candidate_route(form: RouteForm) -> Result<RouteConfig, String> {
     let priority = parse_optional(&form.priority, "priority")?.unwrap_or(0);
     let max_request_body_bytes =
         parse_optional(&form.max_request_body_bytes, "max request body bytes")?;
@@ -143,6 +209,15 @@ fn candidate_route(form: RouteForm) -> Result<RouteConfig, String> {
             max_request_body_bytes,
         },
     })
+}
+
+fn render_added_headers(transform: &HeaderTransform) -> String {
+    transform
+        .add
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn parse_header_transform(
