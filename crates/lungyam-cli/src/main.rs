@@ -1,6 +1,7 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser;
+use lungyam_admin::RuntimeStatus;
 use lungyam_core::config::Config;
 use lungyam_proxy::{run, runtime_banner};
 
@@ -19,13 +20,16 @@ fn main() {
         eprintln!("failed to start {}: {error}", runtime_banner());
         std::process::exit(2);
     });
+    let runtime_status = Arc::new(RuntimeStatus::from_config(&config));
 
     let _admin_handle = if config.admin.enabled {
         Some(
-            lungyam_admin::start(config.clone()).unwrap_or_else(|error| {
-                eprintln!("failed to start Lungyam admin: {error}");
-                std::process::exit(2);
-            }),
+            lungyam_admin::start_with_status(config.clone(), runtime_status).unwrap_or_else(
+                |error| {
+                    eprintln!("failed to start Lungyam admin: {error}");
+                    std::process::exit(2);
+                },
+            ),
         )
     } else {
         None
