@@ -247,8 +247,7 @@ mod tests {
         let duplicate = form("api");
         assert!(candidate_create_config(&config, &duplicate).is_err());
 
-        let candidate =
-            candidate_create_config(&config, &form("canary")).expect("valid candidate");
+        let candidate = candidate_create_config(&config, &form("canary")).expect("valid candidate");
         let canary = &candidate.upstreams["canary"];
         assert_eq!(canary.endpoints.len(), 2);
         assert_eq!(canary.connect_timeout_ms, Some(2500));
