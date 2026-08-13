@@ -50,7 +50,9 @@ fn constant_time_eq(expected: &[u8], candidate: &[u8]) -> bool {
     expected
         .iter()
         .zip(candidate)
-        .fold(0_u8, |difference, (left, right)| difference | (left ^ right))
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
         == 0
 }
 
