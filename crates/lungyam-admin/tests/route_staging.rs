@@ -210,7 +210,11 @@ fn staged_route_update_preserves_active_config_and_candidate_policies() {
             Some("yes")
         );
         assert_eq!(
-            route.policies.rate_limit.as_ref().map(|limit| limit.requests),
+            route
+                .policies
+                .rate_limit
+                .as_ref()
+                .map(|limit| limit.requests),
             Some(20)
         );
         assert_eq!(
