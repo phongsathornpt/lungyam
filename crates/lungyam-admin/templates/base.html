@@ -19,9 +19,9 @@
         </span>
       </a>
       <nav aria-label="Admin navigation">
-        <a class="nav-link active" href="/admin">Overview</a>
+        <a class="nav-link{% if overview_active %} active{% endif %}" href="/admin">Overview</a>
         <span class="nav-section">Proxy</span>
-        <span class="nav-link disabled">Routes</span>
+        <a class="nav-link{% if routes_active %} active{% endif %}" href="/admin/routes">Routes</a>
         <span class="nav-link disabled">Upstreams</span>
         <span class="nav-section">Configuration</span>
         <span class="nav-link disabled">Config</span>
