@@ -60,15 +60,6 @@ struct UpstreamValidationTemplate {
     message: String,
 }
 
-#[derive(Template)]
-#[template(path = "fragments/upstream-stage.html")]
-struct UpstreamStageTemplate {
-    success: bool,
-    upstream_name: String,
-    revision: String,
-    message: String,
-}
-
 pub(super) async fn stage_route(
     State(state): State<AdminState>,
     Form(form): Form<StageRouteForm>,
@@ -260,11 +251,8 @@ fn candidate_upstream_config(config: &Config, form: &StageRouteForm) -> Result<C
         return Err("at least one upstream endpoint is required".to_owned());
     }
 
-    let health_check_interval_seconds = parse_required_duration(
-        &form.health_check_interval,
-        "health-check interval",
-        "s",
-    )?;
+    let health_check_interval_seconds =
+        parse_required_duration(&form.health_check_interval, "health-check interval", "s")?;
     let mut candidate = config.clone();
     candidate.upstreams.insert(
         upstream_name.to_owned(),
@@ -276,11 +264,7 @@ fn candidate_upstream_config(config: &Config, form: &StageRouteForm) -> Result<C
                 "ms",
             )?,
             read_timeout_ms: parse_optional_duration(&form.read_timeout, "read timeout", "ms")?,
-            write_timeout_ms: parse_optional_duration(
-                &form.write_timeout,
-                "write timeout",
-                "ms",
-            )?,
+            write_timeout_ms: parse_optional_duration(&form.write_timeout, "write timeout", "ms")?,
             health_check_interval_seconds,
         },
     );
@@ -293,10 +277,7 @@ fn parse_optional_duration(value: &str, label: &str, suffix: &str) -> Result<Opt
     if value.is_empty() || value.eq_ignore_ascii_case("default") {
         return Ok(None);
     }
-    let value = value
-        .strip_suffix(suffix)
-        .map(str::trim)
-        .unwrap_or(value);
+    let value = value.strip_suffix(suffix).map(str::trim).unwrap_or(value);
     let parsed = value
         .parse::<u64>()
         .map_err(|_| format!("{label} must be a valid number"))?;
@@ -308,10 +289,7 @@ fn parse_optional_duration(value: &str, label: &str, suffix: &str) -> Result<Opt
 
 fn parse_required_duration(value: &str, label: &str, suffix: &str) -> Result<u64, String> {
     let value = value.trim();
-    let value = value
-        .strip_suffix(suffix)
-        .map(str::trim)
-        .unwrap_or(value);
+    let value = value.strip_suffix(suffix).map(str::trim).unwrap_or(value);
     let parsed = value
         .parse::<u64>()
         .map_err(|_| format!("{label} must be a valid number"))?;
@@ -368,20 +346,13 @@ fn render_upstream_stage(
     revision: String,
     message: String,
 ) -> Response {
-    match (UpstreamStageTemplate {
+    render_route_stage(
+        status,
         success,
-        upstream_name,
+        format!("upstream {upstream_name}"),
         revision,
         message,
-    })
-    .render()
-    {
-        Ok(html) => (status, Html(html)).into_response(),
-        Err(error) => {
-            log::error!("failed to render upstream stage result: {error}");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        }
-    }
+    )
 }
 
 fn render_route_stage(
@@ -416,7 +387,7 @@ mod tests {
     };
 
     use super::{
-        StageRouteForm, candidate_upstream_config, candidate_updated_config,
+        StageRouteForm, candidate_updated_config, candidate_upstream_config,
         parse_optional_duration,
     };
     use crate::route_forms::RouteForm;
@@ -429,12 +400,9 @@ mod tests {
         second.path = "/second".to_owned();
         config.routes.push(second);
 
-        let updated = candidate_updated_config(
-            &config,
-            "api-route",
-            route_form("renamed", "/updated"),
-        )
-        .expect("valid update");
+        let updated =
+            candidate_updated_config(&config, "api-route", route_form("renamed", "/updated"))
+                .expect("valid update");
 
         assert_eq!(updated.routes[0].name, "renamed");
         assert_eq!(updated.routes[1].name, "second");
@@ -466,7 +434,10 @@ mod tests {
 
     #[test]
     fn optional_duration_accepts_default_and_rejects_zero() {
-        assert_eq!(parse_optional_duration("Default", "timeout", "ms"), Ok(None));
+        assert_eq!(
+            parse_optional_duration("Default", "timeout", "ms"),
+            Ok(None)
+        );
         assert_eq!(
             parse_optional_duration("1500 ms", "timeout", "ms"),
             Ok(Some(1500))
