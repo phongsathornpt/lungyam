@@ -113,45 +113,17 @@ mod tests {
     use std::collections::BTreeMap;
 
     use askama::Template;
+    use axum::{body::Body, http::Request};
     use lungyam_core::config::{
         AdminConfig, Config, RouteConfig, RoutePolicies, ServerConfig, UpstreamConfig,
     };
+    use tower::ServiceExt;
 
-    use super::DashboardTemplate;
+    use super::{DashboardTemplate, router};
 
     #[test]
     fn dashboard_template_renders_runtime_summary() {
-        let mut upstreams = BTreeMap::new();
-        upstreams.insert(
-            "api".to_owned(),
-            UpstreamConfig {
-                endpoints: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
-                connect_timeout_ms: None,
-                read_timeout_ms: None,
-                write_timeout_ms: None,
-                health_check_interval_seconds: 5,
-            },
-        );
-        let config = Config {
-            server: ServerConfig {
-                listen: "0.0.0.0:8080".to_owned(),
-            },
-            admin: AdminConfig {
-                enabled: true,
-                listen: "127.0.0.1:9090".to_owned(),
-            },
-            upstreams,
-            routes: vec![RouteConfig {
-                name: "api".to_owned(),
-                host: None,
-                path: "/".to_owned(),
-                methods: Vec::new(),
-                upstream: "api".to_owned(),
-                priority: 0,
-                policies: RoutePolicies::default(),
-            }],
-        };
-
+        let config = test_config();
         let template = DashboardTemplate {
             proxy_listen: config.server.listen,
             admin_listen: config.admin.listen,
@@ -170,5 +142,74 @@ mod tests {
         assert!(html.contains("127.0.0.1:9090"));
         assert!(html.contains(">1<"));
         assert!(html.contains(">2<"));
+    }
+
+    #[test]
+    fn admin_routes_respond_over_http_service() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+
+        runtime.block_on(async {
+            let app = router(test_config());
+
+            let health = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/admin/health")
+                        .body(Body::empty())
+                        .expect("health request"),
+                )
+                .await
+                .expect("health response");
+            assert_eq!(health.status(), StatusCode::OK);
+
+            let dashboard = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/admin")
+                        .body(Body::empty())
+                        .expect("dashboard request"),
+                )
+                .await
+                .expect("dashboard response");
+            assert_eq!(dashboard.status(), StatusCode::OK);
+        });
+    }
+
+    fn test_config() -> Config {
+        let mut upstreams = BTreeMap::new();
+        upstreams.insert(
+            "api".to_owned(),
+            UpstreamConfig {
+                endpoints: vec!["127.0.0.1:3000".to_owned(), "127.0.0.1:3001".to_owned()],
+                connect_timeout_ms: None,
+                read_timeout_ms: None,
+                write_timeout_ms: None,
+                health_check_interval_seconds: 5,
+            },
+        );
+
+        Config {
+            server: ServerConfig {
+                listen: "0.0.0.0:8080".to_owned(),
+            },
+            admin: AdminConfig {
+                enabled: true,
+                listen: "127.0.0.1:9090".to_owned(),
+            },
+            upstreams,
+            routes: vec![RouteConfig {
+                name: "api".to_owned(),
+                host: None,
+                path: "/".to_owned(),
+                methods: Vec::new(),
+                upstream: "api".to_owned(),
+                priority: 0,
+                policies: RoutePolicies::default(),
+            }],
+        }
     }
 }
