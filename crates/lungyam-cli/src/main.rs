@@ -23,11 +23,15 @@ fn main() {
 
     let _admin_handle = if config.admin.enabled {
         Some(
-            lungyam_admin::start_with_status(config.clone(), Arc::clone(&runtime_status))
-                .unwrap_or_else(|error| {
-                    eprintln!("failed to start Lungyam admin: {error}");
-                    std::process::exit(2);
-                }),
+            lungyam_admin::start_with_status_and_config_path(
+                config.clone(),
+                Arc::clone(&runtime_status),
+                args.config.clone(),
+            )
+            .unwrap_or_else(|error| {
+                eprintln!("failed to start Lungyam admin: {error}");
+                std::process::exit(2);
+            }),
         )
     } else {
         None
