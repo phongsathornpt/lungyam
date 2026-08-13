@@ -1,6 +1,12 @@
 //! Lightweight server-rendered control plane for Lungyam.
 
-use std::{io, net::TcpListener as StdTcpListener, thread::JoinHandle};
+use std::{
+    io,
+    net::TcpListener as StdTcpListener,
+    sync::Arc,
+    thread::JoinHandle,
+    time::Instant,
+};
 
 use askama::Template;
 use axum::{
@@ -12,9 +18,61 @@ use axum::{
 };
 use lungyam_core::config::Config;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveConfigSummary {
+    pub proxy_listen: String,
+    pub admin_listen: String,
+    pub route_count: usize,
+    pub upstream_count: usize,
+    pub endpoint_count: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuntimeSnapshot {
+    pub uptime_seconds: u64,
+    pub active_config: ActiveConfigSummary,
+}
+
+/// Read-only runtime state exposed to the admin control plane.
+#[derive(Debug)]
+pub struct RuntimeStatus {
+    started_at: Instant,
+    active_config: ActiveConfigSummary,
+}
+
+impl RuntimeStatus {
+    #[must_use]
+    pub fn from_config(config: &Config) -> Self {
+        let endpoint_count = config
+            .upstreams
+            .values()
+            .map(|upstream| upstream.endpoints.len())
+            .sum();
+
+        Self {
+            started_at: Instant::now(),
+            active_config: ActiveConfigSummary {
+                proxy_listen: config.server.listen.clone(),
+                admin_listen: config.admin.listen.clone(),
+                route_count: config.routes.len(),
+                upstream_count: config.upstreams.len(),
+                endpoint_count,
+            },
+        }
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> RuntimeSnapshot {
+        RuntimeSnapshot {
+            uptime_seconds: self.started_at.elapsed().as_secs(),
+            active_config: self.active_config.clone(),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct AdminState {
-    config: Config,
+    runtime: Arc<RuntimeStatus>,
 }
 
 #[derive(Template)]
@@ -25,6 +83,7 @@ struct DashboardTemplate {
     route_count: usize,
     upstream_count: usize,
     endpoint_count: usize,
+    uptime: String,
 }
 
 /// Handle that keeps ownership of the admin server thread.
@@ -33,17 +92,29 @@ pub struct AdminHandle {
     _thread: JoinHandle<()>,
 }
 
-/// Builds the read-only admin router.
+/// Builds the read-only admin router with a fresh runtime status snapshot source.
 pub fn router(config: Config) -> Router {
+    let runtime = Arc::new(RuntimeStatus::from_config(&config));
+    router_with_status(runtime)
+}
+
+/// Builds the read-only admin router around shared runtime status.
+pub fn router_with_status(runtime: Arc<RuntimeStatus>) -> Router {
     Router::new()
         .route("/admin", get(dashboard))
         .route("/admin/health", get(health))
         .route("/admin/assets/lungyam.css", get(stylesheet))
-        .with_state(AdminState { config })
+        .with_state(AdminState { runtime })
 }
 
 /// Starts the independent admin listener in its own runtime thread.
 pub fn start(config: Config) -> io::Result<AdminHandle> {
+    let runtime = Arc::new(RuntimeStatus::from_config(&config));
+    start_with_status(config, runtime)
+}
+
+/// Starts the admin listener with a caller-owned shared runtime status source.
+pub fn start_with_status(config: Config, runtime: Arc<RuntimeStatus>) -> io::Result<AdminHandle> {
     let listen = config.admin.listen.clone();
     let listener = StdTcpListener::bind(&listen)?;
     listener.set_nonblocking(true)?;
@@ -51,16 +122,16 @@ pub fn start(config: Config) -> io::Result<AdminHandle> {
     let thread = std::thread::Builder::new()
         .name("lungyam-admin".to_owned())
         .spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
+            let runtime_thread = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .expect("failed to build admin Tokio runtime");
 
-            runtime.block_on(async move {
+            runtime_thread.block_on(async move {
                 let listener = tokio::net::TcpListener::from_std(listener)
                     .expect("failed to register admin listener with Tokio");
                 log::info!("Lungyam admin listening on {listen}");
-                axum::serve(listener, router(config))
+                axum::serve(listener, router_with_status(runtime))
                     .await
                     .expect("admin server exited with an error");
             });
@@ -70,18 +141,15 @@ pub fn start(config: Config) -> io::Result<AdminHandle> {
 }
 
 async fn dashboard(State(state): State<AdminState>) -> Response {
-    let endpoint_count = state
-        .config
-        .upstreams
-        .values()
-        .map(|upstream| upstream.endpoints.len())
-        .sum();
+    let snapshot = state.runtime.snapshot();
+    let active = snapshot.active_config;
     let template = DashboardTemplate {
-        proxy_listen: state.config.server.listen.clone(),
-        admin_listen: state.config.admin.listen.clone(),
-        route_count: state.config.routes.len(),
-        upstream_count: state.config.upstreams.len(),
-        endpoint_count,
+        proxy_listen: active.proxy_listen,
+        admin_listen: active.admin_listen,
+        route_count: active.route_count,
+        upstream_count: active.upstream_count,
+        endpoint_count: active.endpoint_count,
+        uptime: format_uptime(snapshot.uptime_seconds),
     };
 
     match template.render() {
@@ -108,9 +176,23 @@ async fn stylesheet() -> impl IntoResponse {
     )
 }
 
+fn format_uptime(seconds: u64) -> String {
+    let hours = seconds / 3_600;
+    let minutes = (seconds % 3_600) / 60;
+    let seconds = seconds % 60;
+
+    if hours > 0 {
+        format!("{hours}h {minutes}m {seconds}s")
+    } else if minutes > 0 {
+        format!("{minutes}m {seconds}s")
+    } else {
+        format!("{seconds}s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
     use askama::Template;
     use axum::{
@@ -122,21 +204,31 @@ mod tests {
     };
     use tower::ServiceExt;
 
-    use super::{DashboardTemplate, router};
+    use super::{DashboardTemplate, RuntimeStatus, format_uptime, router_with_status};
+
+    #[test]
+    fn runtime_status_captures_active_config_summary() {
+        let config = test_config();
+        let snapshot = RuntimeStatus::from_config(&config).snapshot();
+
+        assert_eq!(snapshot.active_config.proxy_listen, "0.0.0.0:8080");
+        assert_eq!(snapshot.active_config.admin_listen, "127.0.0.1:9090");
+        assert_eq!(snapshot.active_config.route_count, 1);
+        assert_eq!(snapshot.active_config.upstream_count, 1);
+        assert_eq!(snapshot.active_config.endpoint_count, 2);
+    }
 
     #[test]
     fn dashboard_template_renders_runtime_summary() {
-        let config = test_config();
+        let snapshot = RuntimeStatus::from_config(&test_config()).snapshot();
+        let active = snapshot.active_config;
         let template = DashboardTemplate {
-            proxy_listen: config.server.listen,
-            admin_listen: config.admin.listen,
-            route_count: config.routes.len(),
-            upstream_count: config.upstreams.len(),
-            endpoint_count: config
-                .upstreams
-                .values()
-                .map(|upstream| upstream.endpoints.len())
-                .sum(),
+            proxy_listen: active.proxy_listen,
+            admin_listen: active.admin_listen,
+            route_count: active.route_count,
+            upstream_count: active.upstream_count,
+            endpoint_count: active.endpoint_count,
+            uptime: format_uptime(snapshot.uptime_seconds),
         };
         let html = template.render().expect("dashboard should render");
 
@@ -145,6 +237,7 @@ mod tests {
         assert!(html.contains("127.0.0.1:9090"));
         assert!(html.contains(">1<"));
         assert!(html.contains(">2<"));
+        assert!(html.contains("Uptime"));
     }
 
     #[test]
@@ -155,7 +248,8 @@ mod tests {
             .expect("test runtime");
 
         runtime.block_on(async {
-            let app = router(test_config());
+            let status = Arc::new(RuntimeStatus::from_config(&test_config()));
+            let app = router_with_status(status);
 
             let health = app
                 .clone()
@@ -180,6 +274,13 @@ mod tests {
                 .expect("dashboard response");
             assert_eq!(dashboard.status(), StatusCode::OK);
         });
+    }
+
+    #[test]
+    fn formats_uptime_compactly() {
+        assert_eq!(format_uptime(8), "8s");
+        assert_eq!(format_uptime(68), "1m 8s");
+        assert_eq!(format_uptime(3_668), "1h 1m 8s");
     }
 
     fn test_config() -> Config {
