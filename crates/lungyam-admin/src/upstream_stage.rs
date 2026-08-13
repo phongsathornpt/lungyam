@@ -21,6 +21,7 @@ pub(super) struct StageUpstreamCreateForm {
     #[serde(default)]
     original_name: String,
     upstream_name: String,
+    #[serde(default)]
     endpoints: String,
     #[serde(default)]
     connect_timeout: String,
@@ -28,6 +29,7 @@ pub(super) struct StageUpstreamCreateForm {
     read_timeout: String,
     #[serde(default)]
     write_timeout: String,
+    #[serde(default)]
     health_check_interval: String,
 }
 
@@ -61,16 +63,17 @@ pub(super) async fn stage_create(
     let candidate = match operation {
         "" | "create" => candidate_create_config(&config, &form),
         "update" => candidate_update_config(&config, &form),
+        "delete" => candidate_delete_config(&config, &form),
         other => Err(format!("unsupported upstream mutation operation '{other}'")),
     };
     let candidate = match candidate {
         Ok(candidate) => candidate,
         Err(message) => return render_error(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
-    let reason = if operation == "update" {
-        format!("stage upstream update '{}'", form.original_name.trim())
-    } else {
-        format!("stage upstream create '{upstream_name}'")
+    let reason = match operation {
+        "update" => format!("stage upstream update '{}'", form.original_name.trim()),
+        "delete" => format!("stage upstream delete '{upstream_name}'"),
+        _ => format!("stage upstream create '{upstream_name}'"),
     };
 
     match FileConfigLifecycle::new(config_path).stage(
@@ -130,6 +133,23 @@ fn candidate_update_config(
     candidate
         .upstreams
         .insert(original_name.to_owned(), upstream_config(form)?);
+    candidate.validate().map_err(|error| error.to_string())?;
+    Ok(candidate)
+}
+
+fn candidate_delete_config(
+    config: &Config,
+    form: &StageUpstreamCreateForm,
+) -> Result<Config, String> {
+    let upstream_name = form.upstream_name.trim();
+    if upstream_name.is_empty() {
+        return Err("upstream name must not be empty".to_owned());
+    }
+
+    let mut candidate = config.clone();
+    if candidate.upstreams.remove(upstream_name).is_none() {
+        return Err(format!("upstream '{upstream_name}' was not found"));
+    }
     candidate.validate().map_err(|error| error.to_string())?;
     Ok(candidate)
 }
@@ -235,7 +255,8 @@ mod tests {
     };
 
     use super::{
-        StageUpstreamCreateForm, candidate_create_config, candidate_update_config, stage_create,
+        StageUpstreamCreateForm, candidate_create_config, candidate_delete_config,
+        candidate_update_config, stage_create,
     };
     use crate::{AdminState, security};
 
@@ -267,6 +288,13 @@ mod tests {
         update.upstream_name = "renamed".to_owned();
         assert!(candidate_update_config(&config, &update).is_err());
         assert!(candidate_update_config(&config, &update_form("missing")).is_err());
+    }
+
+    #[test]
+    fn candidate_delete_rejects_last_and_missing_upstream() {
+        let config = test_config(false);
+        assert!(candidate_delete_config(&config, &delete_form("api")).is_err());
+        assert!(candidate_delete_config(&config, &delete_form("missing")).is_err());
     }
 
     #[test]
@@ -392,6 +420,20 @@ mod tests {
             read_timeout: "10000".to_owned(),
             write_timeout: "15000".to_owned(),
             health_check_interval: "7".to_owned(),
+        }
+    }
+
+    fn delete_form(upstream_name: &str) -> StageUpstreamCreateForm {
+        StageUpstreamCreateForm {
+            csrf_token: String::new(),
+            operation: "delete".to_owned(),
+            original_name: String::new(),
+            upstream_name: upstream_name.to_owned(),
+            endpoints: String::new(),
+            connect_timeout: String::new(),
+            read_timeout: String::new(),
+            write_timeout: String::new(),
+            health_check_interval: String::new(),
         }
     }
 

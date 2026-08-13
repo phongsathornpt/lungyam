@@ -12,7 +12,7 @@ use lungyam_core::{
 use tower::ServiceExt;
 
 #[test]
-fn manage_page_renders_upstream_update_form() {
+fn manage_page_renders_upstream_mutation_forms() {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -36,6 +36,8 @@ fn manage_page_renders_upstream_update_form() {
             assert!(html.contains("Stage upstream updates"));
             assert!(html.contains("name=\"operation\" type=\"hidden\" value=\"update\""));
             assert!(html.contains("name=\"original_name\" type=\"hidden\" value=\"api\""));
+            assert!(html.contains("name=\"operation\" type=\"hidden\" value=\"delete\""));
+            assert!(html.contains("Stage delete"));
         });
 }
 
