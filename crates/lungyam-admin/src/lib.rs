@@ -271,9 +271,9 @@ fn format_bytes(bytes: usize) -> String {
     const KIB: usize = 1024;
     const MIB: usize = 1024 * KIB;
 
-    if bytes >= MIB && bytes.is_multiple_of(MIB) {
+    if bytes >= MIB && bytes % MIB == 0 {
         format!("{} MiB", bytes / MIB)
-    } else if bytes >= KIB && bytes.is_multiple_of(KIB) {
+    } else if bytes >= KIB && bytes % KIB == 0 {
         format!("{} KiB", bytes / KIB)
     } else {
         format!("{bytes} B")
