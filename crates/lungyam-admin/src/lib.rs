@@ -57,6 +57,7 @@ struct DashboardTemplate {
     routes_active: bool,
     proxy_listen: String,
     admin_listen: String,
+    admin_mode: String,
     route_count: usize,
     upstream_count: usize,
     endpoint_count: usize,
@@ -185,6 +186,11 @@ async fn dashboard(State(state): State<AdminState>) -> Response {
             routes_active: false,
             proxy_listen: active.proxy_listen,
             admin_listen: active.admin_listen,
+            admin_mode: if active.admin_read_only {
+                "Read-only".to_owned()
+            } else {
+                "Writes enabled".to_owned()
+            },
             route_count: active.route_count,
             upstream_count: active.upstream_count,
             endpoint_count: active.endpoint_count,
@@ -425,6 +431,11 @@ mod tests {
             routes_active: false,
             proxy_listen: active.proxy_listen,
             admin_listen: active.admin_listen,
+            admin_mode: if active.admin_read_only {
+                "Read-only".to_owned()
+            } else {
+                "Writes enabled".to_owned()
+            },
             route_count: active.route_count,
             upstream_count: active.upstream_count,
             endpoint_count: active.endpoint_count,
@@ -664,6 +675,7 @@ mod tests {
             admin: AdminConfig {
                 enabled: true,
                 listen: "127.0.0.1:9090".to_owned(),
+                read_only: true,
             },
             upstreams,
             routes: vec![RouteConfig {

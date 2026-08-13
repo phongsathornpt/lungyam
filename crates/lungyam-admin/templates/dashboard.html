@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">Overview</p>
     <h1>Lungyam Admin</h1>
-    <p class="muted">Read-only control-plane foundation. Proxy traffic remains on the Pingora data plane.</p>
+    <p class="muted">Server-rendered control plane. Proxy traffic remains isolated on the Pingora data plane.</p>
   </div>
   <span class="status"><span class="status-dot"></span> Running</span>
 </header>
@@ -44,6 +44,10 @@
     <div>
       <dt>Admin control plane</dt>
       <dd><code>{{ admin_listen }}</code></dd>
+    </div>
+    <div>
+      <dt>Admin mode</dt>
+      <dd>{{ admin_mode }}</dd>
     </div>
     <div>
       <dt>Config state</dt>

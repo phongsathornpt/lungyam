@@ -6,6 +6,7 @@ use crate::config::{Config, RouteConfig};
 pub struct ActiveConfigSummary {
     pub proxy_listen: String,
     pub admin_listen: String,
+    pub admin_read_only: bool,
     pub route_count: usize,
     pub upstream_count: usize,
     pub endpoint_count: usize,
@@ -58,6 +59,7 @@ impl RuntimeStatus {
             active_config: ActiveConfigSummary {
                 proxy_listen: config.server.listen.clone(),
                 admin_listen: config.admin.listen.clone(),
+                admin_read_only: config.admin.read_only,
                 route_count: config.routes.len(),
                 upstream_count: config.upstreams.len(),
                 endpoint_count,
@@ -125,6 +127,7 @@ mod tests {
         let status = RuntimeStatus::from_config(&config);
 
         let initial = status.snapshot();
+        assert!(initial.active_config.admin_read_only);
         assert_eq!(initial.active_config.route_count, 1);
         assert_eq!(initial.active_config.upstream_count, 1);
         assert_eq!(initial.active_config.endpoint_count, 2);
@@ -174,6 +177,7 @@ mod tests {
             admin: AdminConfig {
                 enabled: true,
                 listen: "127.0.0.1:9090".to_owned(),
+                read_only: true,
             },
             upstreams,
             routes: vec![RouteConfig {

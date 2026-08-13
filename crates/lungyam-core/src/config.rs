@@ -133,6 +133,8 @@ pub struct AdminConfig {
     pub enabled: bool,
     #[serde(default = "default_admin_listen")]
     pub listen: String,
+    #[serde(default = "default_admin_read_only")]
+    pub read_only: bool,
 }
 
 impl Default for AdminConfig {
@@ -140,6 +142,7 @@ impl Default for AdminConfig {
         Self {
             enabled: false,
             listen: default_admin_listen(),
+            read_only: default_admin_read_only(),
         }
     }
 }
@@ -252,6 +255,10 @@ fn default_admin_listen() -> String {
     "127.0.0.1:9090".to_owned()
 }
 
+const fn default_admin_read_only() -> bool {
+    true
+}
+
 const fn default_health_check_interval_seconds() -> u64 {
     5
 }
@@ -280,6 +287,7 @@ routes:
         assert_eq!(config.server.listen, "0.0.0.0:8080");
         assert!(!config.admin.enabled);
         assert_eq!(config.admin.listen, "127.0.0.1:9090");
+        assert!(config.admin.read_only);
         assert_eq!(config.routes[0].upstream, "api");
         assert_eq!(config.upstreams["api"].health_check_interval_seconds, 5);
     }
@@ -288,11 +296,12 @@ routes:
     fn accepts_enabled_admin_listener() {
         let yaml = VALID.replace(
             "upstreams:",
-            "admin:\n  enabled: true\n  listen: 127.0.0.1:9091\nupstreams:",
+            "admin:\n  enabled: true\n  listen: 127.0.0.1:9091\n  read_only: false\nupstreams:",
         );
         let config = Config::from_yaml(&yaml).expect("valid admin configuration");
         assert!(config.admin.enabled);
         assert_eq!(config.admin.listen, "127.0.0.1:9091");
+        assert!(!config.admin.read_only);
     }
 
     #[test]
