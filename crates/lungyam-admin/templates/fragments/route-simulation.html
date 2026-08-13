@@ -1,0 +1,19 @@
+{% if valid %}
+  {% if matched %}
+  <div class="validation-card validation-valid">
+    <strong>Matched route <code>{{ route_name }}</code>.</strong>
+    <span>{{ message }}</span>
+    <span>Upstream <code>{{ upstream }}</code> · priority <code>{{ priority }}</code></span>
+  </div>
+  {% else %}
+  <div class="validation-card validation-neutral">
+    <strong>No route matched.</strong>
+    <span>{{ message }}</span>
+  </div>
+  {% endif %}
+{% else %}
+<div class="validation-card validation-invalid">
+  <strong>Simulation input is invalid.</strong>
+  <span>{{ message }}</span>
+</div>
+{% endif %}
