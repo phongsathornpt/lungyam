@@ -1,14 +1,15 @@
 //! Lightweight server-rendered control plane for Lungyam.
 
+mod revision_views;
 mod route_forms;
 mod route_simulator;
 
-use std::{io, net::TcpListener as StdTcpListener, sync::Arc, thread::JoinHandle};
+use std::{io, net::TcpListener as StdTcpListener, path::PathBuf, sync::Arc, thread::JoinHandle};
 
 use askama::Template;
 use axum::{
     Form, Router,
-    extract::State,
+    extract::{Query, State},
     http::{StatusCode, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
@@ -18,12 +19,14 @@ use lungyam_core::{
     routing::sort_routes,
     runtime::{EndpointHealth, RuntimeStatus},
 };
+use revision_views::DiffQuery;
 use route_forms::RouteForm;
 use route_simulator::RouteMatchForm;
 
 #[derive(Clone)]
 struct AdminState {
     runtime: Arc<RuntimeStatus>,
+    config_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -90,12 +93,26 @@ pub fn router(config: Config) -> Router {
 
 /// Builds the read-only admin router around shared runtime status.
 pub fn router_with_status(runtime: Arc<RuntimeStatus>) -> Router {
+    build_router(runtime, None)
+}
+
+/// Builds the admin router with access to filesystem-backed revision data.
+pub fn router_with_status_and_config_path(
+    runtime: Arc<RuntimeStatus>,
+    config_path: PathBuf,
+) -> Router {
+    build_router(runtime, Some(config_path))
+}
+
+fn build_router(runtime: Arc<RuntimeStatus>, config_path: Option<PathBuf>) -> Router {
     Router::new()
         .route("/admin", get(dashboard))
         .route("/admin/routes", get(routes_page))
         .route("/admin/routes/new", get(new_route_page))
         .route("/admin/routes/validate", post(validate_route))
         .route("/admin/routes/simulate", post(simulate_route))
+        .route("/admin/revisions", get(revisions_page))
+        .route("/admin/fragments/config-diff", get(config_diff_fragment))
         .route("/admin/health", get(health))
         .route(
             "/admin/fragments/upstream-health",
@@ -103,7 +120,10 @@ pub fn router_with_status(runtime: Arc<RuntimeStatus>) -> Router {
         )
         .route("/admin/assets/lungyam.css", get(stylesheet))
         .route("/admin/assets/htmx.min.js", get(htmx_asset))
-        .with_state(AdminState { runtime })
+        .with_state(AdminState {
+            runtime,
+            config_path,
+        })
 }
 
 /// Starts the independent admin listener in its own runtime thread.
@@ -114,6 +134,23 @@ pub fn start(config: Config) -> io::Result<AdminHandle> {
 
 /// Starts the admin listener with a caller-owned shared runtime status source.
 pub fn start_with_status(config: Config, runtime: Arc<RuntimeStatus>) -> io::Result<AdminHandle> {
+    start_with_status_internal(config, runtime, None)
+}
+
+/// Starts the admin listener with access to filesystem-backed revision data.
+pub fn start_with_status_and_config_path(
+    config: Config,
+    runtime: Arc<RuntimeStatus>,
+    config_path: PathBuf,
+) -> io::Result<AdminHandle> {
+    start_with_status_internal(config, runtime, Some(config_path))
+}
+
+fn start_with_status_internal(
+    config: Config,
+    runtime: Arc<RuntimeStatus>,
+    config_path: Option<PathBuf>,
+) -> io::Result<AdminHandle> {
     let listen = config.admin.listen.clone();
     let listener = StdTcpListener::bind(&listen)?;
     listener.set_nonblocking(true)?;
@@ -130,7 +167,7 @@ pub fn start_with_status(config: Config, runtime: Arc<RuntimeStatus>) -> io::Res
                 let listener = tokio::net::TcpListener::from_std(listener)
                     .expect("failed to register admin listener with Tokio");
                 log::info!("Lungyam admin listening on {listen}");
-                axum::serve(listener, router_with_status(runtime))
+                axum::serve(listener, build_router(runtime, config_path))
                     .await
                     .expect("admin server exited with an error");
             });
@@ -195,6 +232,23 @@ async fn simulate_route(
     )
 }
 
+async fn revisions_page(State(state): State<AdminState>) -> Response {
+    render_revision_result(
+        revision_views::render_revisions(state.config_path.as_deref()),
+        "revisions page",
+    )
+}
+
+async fn config_diff_fragment(
+    State(state): State<AdminState>,
+    Query(query): Query<DiffQuery>,
+) -> Response {
+    render_revision_result(
+        revision_views::render_diff(state.config_path.as_deref(), query),
+        "config diff",
+    )
+}
+
 async fn upstream_health_fragment(State(state): State<AdminState>) -> Response {
     let snapshot = state.runtime.snapshot();
     render_template(
@@ -225,6 +279,20 @@ async fn htmx_asset() -> impl IntoResponse {
 
 fn render_template(template: &impl Template, label: &str) -> Response {
     render_html_result(template.render(), label)
+}
+
+fn render_revision_result(result: Result<String, String>, label: &str) -> Response {
+    match result {
+        Ok(html) => Html(html).into_response(),
+        Err(error) => {
+            log::error!("failed to render admin {label}: {error}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to render admin view\n",
+            )
+                .into_response()
+        }
+    }
 }
 
 fn render_html_result(result: askama::Result<String>, label: &str) -> Response {

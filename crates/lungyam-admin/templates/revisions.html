@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <p class="eyebrow">Configuration</p>
+    <h1>Revisions</h1>
+    <p class="muted">{{ message }}</p>
+  </div>
+</header>
+
+<section class="stats-grid">
+  <article class="stat-card">
+    <span>Active revision</span>
+    <strong>{{ active_revision }}</strong>
+  </article>
+  <article class="stat-card">
+    <span>Pending revision</span>
+    <strong>{{ pending_revision }}</strong>
+  </article>
+</section>
+
+{% if available %}
+<section class="panel panel-spaced">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">History</p>
+      <h2>Immutable snapshots</h2>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="route-table">
+      <thead>
+        <tr>
+          <th scope="col">Revision</th>
+          <th scope="col">Status</th>
+          <th scope="col">Created</th>
+          <th scope="col">Actor</th>
+          <th scope="col">Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for revision in revisions %}
+        <tr>
+          <td><code>{{ revision.label }}</code></td>
+          <td><span class="policy-badge">{{ revision.status }}</span></td>
+          <td>{{ revision.created_at }}</td>
+          <td>{{ revision.actor }}</td>
+          <td>{{ revision.reason }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel panel-spaced">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Preview</p>
+      <h2>Configuration diff</h2>
+      <p class="muted">Compare two immutable revisions before any activation workflow is enabled.</p>
+    </div>
+  </div>
+
+  {% if can_diff %}
+  <form
+    class="form-grid form-grid-three panel-spaced"
+    method="get"
+    action="/admin/fragments/config-diff"
+    hx-get="/admin/fragments/config-diff"
+    hx-target="#config-diff"
+    hx-swap="innerHTML"
+  >
+    <label class="field">
+      <span>From</span>
+      <select name="from" required>
+        {% for revision in revisions %}
+        <option value="{{ revision.revision }}">{{ revision.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field">
+      <span>To</span>
+      <select name="to" required>
+        {% for revision in revisions %}
+        <option value="{{ revision.revision }}">{{ revision.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="form-actions">
+      <button class="button" type="submit">Preview diff</button>
+    </div>
+  </form>
+  {% else %}
+  <p class="muted panel-spaced">At least two revisions are required before a diff can be previewed.</p>
+  {% endif %}
+
+  <div id="config-diff" class="validation-slot panel-spaced" aria-live="polite">
+    <div class="validation-card validation-neutral">Select two revisions to inspect their effective configuration changes.</div>
+  </div>
+</section>
+{% endif %}
+{% endblock %}
