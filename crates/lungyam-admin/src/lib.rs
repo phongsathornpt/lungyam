@@ -219,13 +219,10 @@ fn route_views(mut routes: Vec<RouteConfig>) -> Vec<RouteView> {
                 + route.policies.request_headers.remove.len()
                 + route.policies.response_headers.add.len()
                 + route.policies.response_headers.remove.len();
-            let rate_limit = route
-                .policies
-                .rate_limit
-                .as_ref()
-                .map_or_else(|| "Off".to_owned(), |limit| {
-                    format!("{} / {}s", limit.requests, limit.window_seconds)
-                });
+            let rate_limit = route.policies.rate_limit.as_ref().map_or_else(
+                || "Off".to_owned(),
+                |limit| format!("{} / {}s", limit.requests, limit.window_seconds),
+            );
             let body_limit = route
                 .policies
                 .max_request_body_bytes
