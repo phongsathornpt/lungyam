@@ -38,7 +38,10 @@ fn revision_store_round_trips_history_and_rejects_invalid_config() {
     assert_eq!(second.revision, 2);
 
     let listed = store.list().expect("list revisions");
-    assert_eq!(listed.iter().map(|item| item.revision).collect::<Vec<_>>(), vec![2, 1]);
+    assert_eq!(
+        listed.iter().map(|item| item.revision).collect::<Vec<_>>(),
+        vec![2, 1]
+    );
     assert_eq!(store.load(2).expect("load revision").config, changed);
 
     let mut invalid = config;
