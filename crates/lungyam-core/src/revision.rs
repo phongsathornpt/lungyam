@@ -3,7 +3,10 @@ use std::{
     fs::{self, OpenOptions},
     io::{self, Write},
     path::{Path, PathBuf},
-    sync::{Mutex, atomic::{AtomicU64, Ordering}},
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -107,7 +110,8 @@ impl FileRevisionStore {
         }
         Ok(ConfigRevision {
             metadata: read_metadata(&directory, revision)?,
-            config: Config::from_path(directory.join("config.yaml")).map_err(RevisionError::Config)?,
+            config: Config::from_path(directory.join("config.yaml"))
+                .map_err(RevisionError::Config)?,
         })
     }
 }
@@ -135,8 +139,14 @@ fn persist(root: &Path, config: &Config, metadata: &RevisionMetadata) -> Result<
     fs::create_dir(&temp_path)?;
 
     let result = (|| -> Result<(), RevisionError> {
-        write_synced(&temp_path.join("config.yaml"), &serde_yaml::to_string(config)?)?;
-        write_synced(&temp_path.join("metadata.yaml"), &serde_yaml::to_string(metadata)?)?;
+        write_synced(
+            &temp_path.join("config.yaml"),
+            &serde_yaml::to_string(config)?,
+        )?;
+        write_synced(
+            &temp_path.join("metadata.yaml"),
+            &serde_yaml::to_string(metadata)?,
+        )?;
         fs::rename(&temp_path, &final_path)?;
         Ok(())
     })();
