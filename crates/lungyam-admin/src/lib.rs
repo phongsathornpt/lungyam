@@ -1,12 +1,6 @@
 //! Lightweight server-rendered control plane for Lungyam.
 
-use std::{
-    io,
-    net::TcpListener as StdTcpListener,
-    sync::Arc,
-    thread::JoinHandle,
-    time::Instant,
-};
+use std::{io, net::TcpListener as StdTcpListener, sync::Arc, thread::JoinHandle, time::Instant};
 
 use askama::Template;
 use axum::{
