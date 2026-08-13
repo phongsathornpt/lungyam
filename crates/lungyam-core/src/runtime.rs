@@ -4,7 +4,10 @@ use std::{
     time::Instant,
 };
 
-use crate::config::{Config, RouteConfig};
+use crate::{
+    config::{Config, RouteConfig},
+    routing::sort_routes,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveConfigSummary {
@@ -38,13 +41,18 @@ pub struct RuntimeSnapshot {
 #[derive(Clone, Debug)]
 pub struct RuntimeConfigSnapshot {
     config: Arc<Config>,
+    routes: Arc<Vec<RouteConfig>>,
 }
 
 impl RuntimeConfigSnapshot {
     #[must_use]
     pub fn from_config(config: &Config) -> Self {
+        let mut routes = config.routes.clone();
+        sort_routes(&mut routes);
+
         Self {
             config: Arc::new(config.clone()),
+            routes: Arc::new(routes),
         }
     }
 
@@ -53,9 +61,10 @@ impl RuntimeConfigSnapshot {
         self.config.as_ref()
     }
 
+    /// Returns the immutable route table in proxy evaluation order.
     #[must_use]
     pub fn routes(&self) -> &[RouteConfig] {
-        &self.config.routes
+        self.routes.as_ref()
     }
 }
 
@@ -122,7 +131,7 @@ impl RuntimeStatus {
         self.config.config().clone()
     }
 
-    /// Returns the currently active route configuration snapshot as owned values.
+    /// Returns the currently active route configuration snapshot in proxy evaluation order.
     #[must_use]
     pub fn routes(&self) -> Vec<RouteConfig> {
         self.config.routes().to_vec()
@@ -210,6 +219,33 @@ mod tests {
         assert_eq!(first.config().upstreams.len(), 1);
         assert!(std::ptr::eq(first.config(), second.config()));
         assert_eq!(second.routes()[0].name, "api");
+    }
+
+    #[test]
+    fn config_snapshot_precomputes_proxy_route_order() {
+        let mut config = test_config();
+        let mut lower = config.routes[0].clone();
+        lower.name = "lower".to_owned();
+        lower.priority = 10;
+        lower.path = "/api/long".to_owned();
+
+        let mut higher = lower.clone();
+        higher.name = "higher".to_owned();
+        higher.priority = 20;
+        higher.path = "/".to_owned();
+
+        let mut specific = higher.clone();
+        specific.name = "specific".to_owned();
+        specific.path = "/api".to_owned();
+
+        config.routes = vec![lower, higher, specific];
+        let status = RuntimeStatus::from_config(&config);
+        let snapshot = status.config_snapshot();
+
+        assert_eq!(snapshot.routes()[0].name, "specific");
+        assert_eq!(snapshot.routes()[1].name, "higher");
+        assert_eq!(snapshot.routes()[2].name, "lower");
+        assert_eq!(snapshot.config().routes[0].name, "lower");
     }
 
     fn test_config() -> Config {
