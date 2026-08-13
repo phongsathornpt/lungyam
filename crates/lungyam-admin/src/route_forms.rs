@@ -42,6 +42,16 @@ struct UpstreamOption {
 }
 
 #[derive(Clone, Debug)]
+struct UpstreamPoolView {
+    name: String,
+    endpoints: Vec<String>,
+    connect_timeout: String,
+    read_timeout: String,
+    write_timeout: String,
+    health_check_interval: String,
+}
+
+#[derive(Clone, Debug)]
 struct ExistingRouteView {
     name: String,
     host: String,
@@ -64,6 +74,7 @@ struct RouteFormTemplate {
     overview_active: bool,
     routes_active: bool,
     upstreams: Vec<String>,
+    upstream_pools: Vec<UpstreamPoolView>,
     existing_routes: Vec<ExistingRouteView>,
     csrf_token: String,
     writes_enabled: bool,
@@ -79,6 +90,18 @@ struct RouteValidationTemplate {
 
 pub(crate) fn render_new_route(config: &Config) -> askama::Result<String> {
     let upstreams = config.upstreams.keys().cloned().collect::<Vec<_>>();
+    let upstream_pools = config
+        .upstreams
+        .iter()
+        .map(|(name, upstream)| UpstreamPoolView {
+            name: name.clone(),
+            endpoints: upstream.endpoints.clone(),
+            connect_timeout: format_timeout(upstream.connect_timeout_ms),
+            read_timeout: format_timeout(upstream.read_timeout_ms),
+            write_timeout: format_timeout(upstream.write_timeout_ms),
+            health_check_interval: format!("{} s", upstream.health_check_interval_seconds),
+        })
+        .collect();
     let existing_routes = config
         .routes
         .iter()
@@ -123,6 +146,7 @@ pub(crate) fn render_new_route(config: &Config) -> askama::Result<String> {
         overview_active: false,
         routes_active: true,
         upstreams,
+        upstream_pools,
         existing_routes,
         csrf_token: security::csrf_token().expose().to_owned(),
         writes_enabled: security::writes_enabled(config),
@@ -220,6 +244,10 @@ fn render_added_headers(transform: &HeaderTransform) -> String {
         .join("\n")
 }
 
+fn format_timeout(timeout_ms: Option<u64>) -> String {
+    timeout_ms.map_or_else(|| "Default".to_owned(), |value| format!("{value} ms"))
+}
+
 fn parse_header_transform(
     add_input: &str,
     remove_input: &str,
@@ -288,7 +316,19 @@ mod tests {
 
     use lungyam_core::config::{AdminConfig, ServerConfig, UpstreamConfig};
 
-    use super::{RouteForm, render_validation};
+    use super::{RouteForm, render_new_route, render_validation};
+
+    #[test]
+    fn renders_read_only_upstream_pool_configuration() {
+        let html = render_new_route(&test_config()).expect("manage page should render");
+
+        assert!(html.contains("Backend pools"));
+        assert!(html.contains("api"));
+        assert!(html.contains("127.0.0.1:3000"));
+        assert!(html.contains("Default"));
+        assert!(html.contains("5 s"));
+        assert!(html.contains("restart-required"));
+    }
 
     #[test]
     fn validates_candidate_with_header_transforms_and_core_rules() {
