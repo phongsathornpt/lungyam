@@ -24,6 +24,42 @@
 <section class="panel panel-spaced">
   <div class="panel-heading">
     <div>
+      <p class="eyebrow">Activation</p>
+      <h2>Apply pending revision</h2>
+      <p class="muted">Route-only changes are applied live to new proxy requests. Server, admin, and upstream structural changes update the active configuration on disk but require a process restart.</p>
+    </div>
+  </div>
+
+  {% if has_pending %}
+    {% if writes_enabled %}
+    <form
+      class="form-actions panel-spaced"
+      method="post"
+      action="/admin/revisions/activate"
+      hx-post="/admin/revisions/activate"
+      hx-target="#runtime-apply-result"
+      hx-swap="innerHTML"
+      hx-confirm="Activate the pending Lungyam configuration revision?"
+    >
+      <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
+      <button class="button" type="submit">Activate pending</button>
+      <span class="muted">The revision is validated again before activation.</span>
+    </form>
+    {% else %}
+    <p class="muted panel-spaced">Admin writes are disabled for this listener, so pending revisions cannot be activated here.</p>
+    {% endif %}
+  {% else %}
+  <p class="muted panel-spaced">There is no pending revision to activate.</p>
+  {% endif %}
+
+  <div id="runtime-apply-result" class="validation-slot panel-spaced" aria-live="polite">
+    <div class="validation-card validation-neutral">No activation attempted in this session.</div>
+  </div>
+</section>
+
+<section class="panel panel-spaced">
+  <div class="panel-heading">
+    <div>
       <p class="eyebrow">History</p>
       <h2>Immutable snapshots</h2>
     </div>
@@ -59,7 +95,7 @@
     <div>
       <p class="eyebrow">Preview</p>
       <h2>Configuration diff</h2>
-      <p class="muted">Compare two immutable revisions before any activation workflow is enabled.</p>
+      <p class="muted">Compare two immutable revisions before activation.</p>
     </div>
   </div>
 
