@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 askama = "0.16.0"
 axum = "0.8.9"
+getrandom = "0.4.3"
 log = "0.4"
 lungyam-core = { path = "../lungyam-core" }
 serde = { version = "1", features = ["derive"] }
