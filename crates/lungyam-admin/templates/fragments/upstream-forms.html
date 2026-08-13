@@ -1,0 +1,58 @@
+<section class="panel panel-spaced" id="manage-upstreams">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Upstreams</p>
+      <h2>Validate and stage backend pool changes</h2>
+      <p class="muted">Every candidate is validated against the full Lungyam config. Upstream changes are restart-required and staging never changes the active proxy.</p>
+    </div>
+  </div>
+
+  <details class="panel-spaced">
+    <summary><strong>Create upstream</strong></summary>
+    <form class="route-form panel-spaced" method="post" action="/admin/routes/stage" hx-post="/admin/routes/stage" hx-target="#upstream-create-result" hx-swap="innerHTML">
+      <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
+      <input name="name" type="hidden" value="_upstream_candidate">
+      <input name="path" type="hidden" value="/">
+      <input name="upstream" type="hidden" value="_unused">
+      <div class="form-grid">
+        <label class="field"><span>Name</span><input name="upstream_name" type="text" required placeholder="canary"></label>
+        <label class="field"><span>Endpoints</span><textarea name="endpoints" rows="4" required placeholder="127.0.0.1:4000&#10;127.0.0.1:4001"></textarea><small>One endpoint per line or comma-separated.</small></label>
+        <label class="field"><span>Connect timeout (ms)</span><input name="connect_timeout" type="text" placeholder="Default"></label>
+        <label class="field"><span>Read timeout (ms)</span><input name="read_timeout" type="text" placeholder="Default"></label>
+        <label class="field"><span>Write timeout (ms)</span><input name="write_timeout" type="text" placeholder="Default"></label>
+        <label class="field"><span>Health check interval (s)</span><input name="health_check_interval" type="number" min="1" required value="5"></label>
+      </div>
+      <div class="form-actions">
+        <button class="button button-secondary" type="submit" name="operation" value="validate-upstream">Validate upstream</button>
+        {% if writes_enabled %}<button class="button" type="submit" name="operation" value="stage-upstream">Stage upstream</button>{% endif %}
+      </div>
+    </form>
+    <div id="upstream-create-result" class="validation-slot panel-spaced" aria-live="polite"><div class="validation-card validation-neutral">Validate before staging. No active runtime change occurs here.</div></div>
+  </details>
+
+  {% for upstream in upstream_pools %}
+  <details class="panel-spaced">
+    <summary><strong>Edit {{ upstream.name }}</strong></summary>
+    <form class="route-form panel-spaced" method="post" action="/admin/routes/stage" hx-post="/admin/routes/stage" hx-target="#upstream-result-{{ loop.index }}" hx-swap="innerHTML">
+      <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
+      <input name="name" type="hidden" value="_upstream_candidate">
+      <input name="path" type="hidden" value="/">
+      <input name="upstream" type="hidden" value="_unused">
+      <input name="upstream_original_name" type="hidden" value="{{ upstream.name }}">
+      <div class="form-grid">
+        <label class="field"><span>Name</span><input name="upstream_name" type="text" readonly value="{{ upstream.name }}"><small>Renaming pools is intentionally disabled to preserve route references.</small></label>
+        <label class="field"><span>Endpoints</span><textarea name="endpoints" rows="4" required>{% for endpoint in upstream.endpoints %}{{ endpoint }}{% if !loop.last %}&#10;{% endif %}{% endfor %}</textarea></label>
+        <label class="field"><span>Connect timeout</span><input name="connect_timeout" type="text" value="{{ upstream.connect_timeout }}"></label>
+        <label class="field"><span>Read timeout</span><input name="read_timeout" type="text" value="{{ upstream.read_timeout }}"></label>
+        <label class="field"><span>Write timeout</span><input name="write_timeout" type="text" value="{{ upstream.write_timeout }}"></label>
+        <label class="field"><span>Health check interval</span><input name="health_check_interval" type="text" required value="{{ upstream.health_check_interval }}"></label>
+      </div>
+      <div class="form-actions">
+        <button class="button button-secondary" type="submit" name="operation" value="validate-upstream">Validate update</button>
+        {% if writes_enabled %}<button class="button" type="submit" name="operation" value="stage-upstream">Stage update</button>{% endif %}
+      </div>
+    </form>
+    <div id="upstream-result-{{ loop.index }}" class="validation-slot panel-spaced" aria-live="polite"><div class="validation-card validation-neutral">No candidate validated yet.</div></div>
+  </details>
+  {% endfor %}
+</section>
