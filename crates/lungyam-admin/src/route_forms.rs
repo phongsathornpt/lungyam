@@ -1,9 +1,7 @@
 use std::collections::BTreeMap;
 
 use askama::Template;
-use lungyam_core::config::{
-    Config, HeaderTransform, RateLimitConfig, RouteConfig, RoutePolicies,
-};
+use lungyam_core::config::{Config, HeaderTransform, RateLimitConfig, RouteConfig, RoutePolicies};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]

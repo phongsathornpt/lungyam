@@ -21,10 +21,7 @@ struct RouteSimulationTemplate {
     message: String,
 }
 
-pub(crate) fn render_simulation(
-    config: &Config,
-    form: RouteMatchForm,
-) -> askama::Result<String> {
+pub(crate) fn render_simulation(config: &Config, form: RouteMatchForm) -> askama::Result<String> {
     let host = form.host.trim();
     let path = form.path.trim();
     let method = form.method.trim();
