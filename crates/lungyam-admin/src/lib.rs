@@ -175,9 +175,7 @@ mod tests {
         http::{Request, StatusCode},
     };
     use lungyam_core::{
-        config::{
-            AdminConfig, Config, RouteConfig, RoutePolicies, ServerConfig, UpstreamConfig,
-        },
+        config::{AdminConfig, Config, RouteConfig, RoutePolicies, ServerConfig, UpstreamConfig},
         runtime::RuntimeStatus,
     };
     use tower::ServiceExt;
