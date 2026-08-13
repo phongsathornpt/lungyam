@@ -1,6 +1,7 @@
 //! Core domain types and policies shared by Lungyam runtimes.
 
 pub mod config;
+pub mod routing;
 pub mod runtime;
 
 /// Human-readable project name used by runtime adapters.
