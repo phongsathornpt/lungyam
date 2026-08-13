@@ -32,12 +32,20 @@ fn revisions_page_and_diff_fragment_render_persisted_state() {
     let revisions = FileRevisionStore::beside_config(&config_path);
 
     let first = revisions
-        .create(&config, Some("admin".to_owned()), Some("initial".to_owned()))
+        .create(
+            &config,
+            Some("admin".to_owned()),
+            Some("initial".to_owned()),
+        )
         .expect("create first revision");
     let mut changed = config.clone();
     changed.routes[0].priority = 50;
     let second = revisions
-        .create(&changed, Some("admin".to_owned()), Some("priority".to_owned()))
+        .create(
+            &changed,
+            Some("admin".to_owned()),
+            Some("priority".to_owned()),
+        )
         .expect("create second revision");
 
     FileRevisionStateStore::new(revisions.root())
