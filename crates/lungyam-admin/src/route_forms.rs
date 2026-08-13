@@ -1,5 +1,9 @@
+use std::collections::BTreeMap;
+
 use askama::Template;
-use lungyam_core::config::{Config, RateLimitConfig, RouteConfig, RoutePolicies};
+use lungyam_core::config::{
+    Config, HeaderTransform, RateLimitConfig, RouteConfig, RoutePolicies,
+};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -13,6 +17,14 @@ pub(crate) struct RouteForm {
     pub upstream: String,
     #[serde(default)]
     pub priority: String,
+    #[serde(default)]
+    pub request_add_headers: String,
+    #[serde(default)]
+    pub request_remove_headers: String,
+    #[serde(default)]
+    pub response_add_headers: String,
+    #[serde(default)]
+    pub response_remove_headers: String,
     #[serde(default)]
     pub rate_limit_requests: String,
     #[serde(default)]
@@ -76,6 +88,16 @@ fn candidate_route(form: RouteForm) -> Result<RouteConfig, String> {
     let priority = parse_optional(&form.priority, "priority")?.unwrap_or(0);
     let max_request_body_bytes =
         parse_optional(&form.max_request_body_bytes, "max request body bytes")?;
+    let request_headers = parse_header_transform(
+        &form.request_add_headers,
+        &form.request_remove_headers,
+        "request",
+    )?;
+    let response_headers = parse_header_transform(
+        &form.response_add_headers,
+        &form.response_remove_headers,
+        "response",
+    )?;
 
     let rate_requests = parse_optional(&form.rate_limit_requests, "rate-limit requests")?;
     let rate_window = parse_optional(&form.rate_limit_window_seconds, "rate-limit window seconds")?;
@@ -106,11 +128,54 @@ fn candidate_route(form: RouteForm) -> Result<RouteConfig, String> {
         upstream: form.upstream.trim().to_owned(),
         priority,
         policies: RoutePolicies {
+            request_headers,
+            response_headers,
             rate_limit,
             max_request_body_bytes,
-            ..RoutePolicies::default()
         },
     })
+}
+
+fn parse_header_transform(
+    add_input: &str,
+    remove_input: &str,
+    direction: &str,
+) -> Result<HeaderTransform, String> {
+    let mut add = BTreeMap::new();
+    for (index, raw_line) in add_input.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            return Err(format!(
+                "{direction} add header line {} must use 'name: value'",
+                index + 1
+            ));
+        };
+        let name = name.trim();
+        let value = value.trim();
+        if name.is_empty() {
+            return Err(format!(
+                "{direction} add header line {} has an empty name",
+                index + 1
+            ));
+        }
+        if add.insert(name.to_owned(), value.to_owned()).is_some() {
+            return Err(format!(
+                "{direction} add header '{name}' is configured more than once"
+            ));
+        }
+    }
+
+    let remove = remove_input
+        .split([',', '\n'])
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
+
+    Ok(HeaderTransform { add, remove })
 }
 
 fn non_empty(value: String) -> Option<String> {
@@ -142,7 +207,7 @@ mod tests {
     use super::{RouteForm, render_validation};
 
     #[test]
-    fn validates_candidate_with_core_config_rules() {
+    fn validates_candidate_with_header_transforms_and_core_rules() {
         let html = render_validation(
             &test_config(),
             RouteForm {
@@ -152,6 +217,10 @@ mod tests {
                 methods: "GET, POST".to_owned(),
                 upstream: "api".to_owned(),
                 priority: "100".to_owned(),
+                request_add_headers: "x-added: from-admin\nx-trace: yes".to_owned(),
+                request_remove_headers: "x-remove-me".to_owned(),
+                response_add_headers: "x-response: enabled".to_owned(),
+                response_remove_headers: "server, x-internal".to_owned(),
                 rate_limit_requests: "10".to_owned(),
                 rate_limit_window_seconds: "60".to_owned(),
                 max_request_body_bytes: "1024".to_owned(),
@@ -164,16 +233,20 @@ mod tests {
     }
 
     #[test]
-    fn surfaces_core_validation_errors() {
+    fn surfaces_core_header_validation_errors() {
         let html = render_validation(
             &test_config(),
             RouteForm {
-                name: "bad-route".to_owned(),
+                name: "bad-header".to_owned(),
                 host: String::new(),
-                path: "missing-slash".to_owned(),
+                path: "/".to_owned(),
                 methods: String::new(),
                 upstream: "api".to_owned(),
                 priority: "0".to_owned(),
+                request_add_headers: "bad header: value".to_owned(),
+                request_remove_headers: String::new(),
+                response_add_headers: String::new(),
+                response_remove_headers: String::new(),
                 rate_limit_requests: String::new(),
                 rate_limit_window_seconds: String::new(),
                 max_request_body_bytes: String::new(),
@@ -182,7 +255,33 @@ mod tests {
         .expect("validation fragment should render");
 
         assert!(html.contains("Route is invalid"));
-        assert!(html.contains("path must start with"));
+        assert!(html.contains("header add name"));
+    }
+
+    #[test]
+    fn rejects_malformed_header_line() {
+        let html = render_validation(
+            &test_config(),
+            RouteForm {
+                name: "bad-header-line".to_owned(),
+                host: String::new(),
+                path: "/".to_owned(),
+                methods: String::new(),
+                upstream: "api".to_owned(),
+                priority: "0".to_owned(),
+                request_add_headers: "missing-separator".to_owned(),
+                request_remove_headers: String::new(),
+                response_add_headers: String::new(),
+                response_remove_headers: String::new(),
+                rate_limit_requests: String::new(),
+                rate_limit_window_seconds: String::new(),
+                max_request_body_bytes: String::new(),
+            },
+        )
+        .expect("validation fragment should render");
+
+        assert!(html.contains("must use"));
+        assert!(html.contains("name: value"));
     }
 
     #[test]
@@ -196,6 +295,10 @@ mod tests {
                 methods: String::new(),
                 upstream: "api".to_owned(),
                 priority: "0".to_owned(),
+                request_add_headers: String::new(),
+                request_remove_headers: String::new(),
+                response_add_headers: String::new(),
+                response_remove_headers: String::new(),
                 rate_limit_requests: "10".to_owned(),
                 rate_limit_window_seconds: String::new(),
                 max_request_body_bytes: String::new(),
