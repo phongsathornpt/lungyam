@@ -40,7 +40,7 @@
       <div>
         <p class="eyebrow">Edit</p>
         <h3>Stage upstream updates</h3>
-        <p class="muted">Names are immutable for now. Editing endpoints or timeout/health settings creates a pending revision and does not change the active proxy runtime.</p>
+        <p class="muted">Names are immutable for now. Editing or removing an upstream creates a pending revision and does not change the active proxy runtime.</p>
       </div>
     </div>
     {% for upstream in upstream_pools %}
@@ -68,7 +68,20 @@
           <span class="muted">Creates a pending revision. Restart is required after activation.</span>
         </div>
       </form>
-      <div id="upstream-update-result-{{ loop.index }}" class="validation-slot panel-spaced" aria-live="polite"><div class="validation-card validation-neutral">No staged update for this upstream yet.</div></div>
+      <form
+        class="form-actions panel-spaced"
+        hx-post="/admin/upstreams/stage-create"
+        hx-target="#upstream-update-result-{{ loop.index }}"
+        hx-swap="innerHTML"
+        hx-confirm="Stage deletion of upstream '{{ upstream.name }}'?"
+      >
+        <input name="operation" type="hidden" value="delete">
+        <input name="upstream_name" type="hidden" value="{{ upstream.name }}">
+        <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
+        <button class="button button-secondary" type="submit">Stage delete</button>
+        <span class="muted">Deletion is rejected if the resulting configuration fails core validation, including routes that still reference this upstream.</span>
+      </form>
+      <div id="upstream-update-result-{{ loop.index }}" class="validation-slot panel-spaced" aria-live="polite"><div class="validation-card validation-neutral">No staged change for this upstream yet.</div></div>
     </details>
     {% endfor %}
   </div>
