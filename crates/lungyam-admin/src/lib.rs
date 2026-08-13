@@ -34,7 +34,6 @@ pub struct AdminHandle {
 }
 
 /// Builds the read-only admin router.
-#[must_use]
 pub fn router(config: Config) -> Router {
     Router::new()
         .route("/admin", get(dashboard))
