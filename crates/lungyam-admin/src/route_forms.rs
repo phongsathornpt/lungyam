@@ -51,7 +51,9 @@ pub(crate) fn render_validation(config: &Config, form: RouteForm) -> askama::Res
     let result = candidate_route(form).and_then(|candidate| {
         let mut candidate_config = config.clone();
         candidate_config.routes.push(candidate);
-        candidate_config.validate().map_err(|error| error.to_string())
+        candidate_config
+            .validate()
+            .map_err(|error| error.to_string())
     });
 
     let (valid, message) = match result {
@@ -72,16 +74,11 @@ pub(crate) fn render_validation(config: &Config, form: RouteForm) -> askama::Res
 
 fn candidate_route(form: RouteForm) -> Result<RouteConfig, String> {
     let priority = parse_optional(&form.priority, "priority")?.unwrap_or(0);
-    let max_request_body_bytes = parse_optional(
-        &form.max_request_body_bytes,
-        "max request body bytes",
-    )?;
+    let max_request_body_bytes =
+        parse_optional(&form.max_request_body_bytes, "max request body bytes")?;
 
     let rate_requests = parse_optional(&form.rate_limit_requests, "rate-limit requests")?;
-    let rate_window = parse_optional(
-        &form.rate_limit_window_seconds,
-        "rate-limit window seconds",
-    )?;
+    let rate_window = parse_optional(&form.rate_limit_window_seconds, "rate-limit window seconds")?;
     let rate_limit = match (rate_requests, rate_window) {
         (None, None) => None,
         (Some(requests), Some(window_seconds)) => Some(RateLimitConfig {
@@ -140,9 +137,7 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
-    use lungyam_core::config::{
-        AdminConfig, ServerConfig, UpstreamConfig,
-    };
+    use lungyam_core::config::{AdminConfig, ServerConfig, UpstreamConfig};
 
     use super::{RouteForm, render_validation};
 
