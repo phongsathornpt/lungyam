@@ -79,6 +79,31 @@ grep -q '>/echo<' <<<"$routes_body"
 grep -q '>fixture<' <<<"$routes_body"
 grep -q 'Body 64 B' <<<"$routes_body"
 grep -q 'href="/admin/routes/new"' <<<"$routes_body"
+grep -q 'hx-post="/admin/routes/simulate"' <<<"$routes_body"
+
+matched_route=$(curl --silent --fail \
+  --request POST \
+  --header 'content-type: application/x-www-form-urlencoded' \
+  --data 'host=api.test%3A8443&path=%2Fecho%2Fusers&method=POST' \
+  http://127.0.0.1:19090/admin/routes/simulate)
+grep -q 'Matched route' <<<"$matched_route"
+grep -q 'echo' <<<"$matched_route"
+grep -q 'fixture' <<<"$matched_route"
+
+unmatched_route=$(curl --silent --fail \
+  --request POST \
+  --header 'content-type: application/x-www-form-urlencoded' \
+  --data 'host=api.test&path=%2Fecho&method=GET' \
+  http://127.0.0.1:19090/admin/routes/simulate)
+grep -q 'No route matched' <<<"$unmatched_route"
+
+invalid_simulation=$(curl --silent --fail \
+  --request POST \
+  --header 'content-type: application/x-www-form-urlencoded' \
+  --data 'host=&path=echo&method=POST' \
+  http://127.0.0.1:19090/admin/routes/simulate)
+grep -q 'Simulation input is invalid' <<<"$invalid_simulation"
+grep -q 'path must start' <<<"$invalid_simulation"
 
 new_route_body=$(curl --silent --fail http://127.0.0.1:19090/admin/routes/new)
 grep -q '>New route<' <<<"$new_route_body"

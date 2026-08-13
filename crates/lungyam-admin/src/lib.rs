@@ -1,6 +1,7 @@
 //! Lightweight server-rendered control plane for Lungyam.
 
 mod route_forms;
+mod route_simulator;
 
 use std::{io, net::TcpListener as StdTcpListener, sync::Arc, thread::JoinHandle};
 
@@ -14,9 +15,11 @@ use axum::{
 };
 use lungyam_core::{
     config::{Config, RouteConfig},
+    routing::sort_routes,
     runtime::{EndpointHealth, RuntimeStatus},
 };
 use route_forms::RouteForm;
+use route_simulator::RouteMatchForm;
 
 #[derive(Clone)]
 struct AdminState {
@@ -92,6 +95,7 @@ pub fn router_with_status(runtime: Arc<RuntimeStatus>) -> Router {
         .route("/admin/routes", get(routes_page))
         .route("/admin/routes/new", get(new_route_page))
         .route("/admin/routes/validate", post(validate_route))
+            .route("/admin/routes/simulate", post(simulate_route))
         .route("/admin/health", get(health))
         .route(
             "/admin/fragments/upstream-health",
@@ -181,6 +185,16 @@ async fn validate_route(State(state): State<AdminState>, Form(form): Form<RouteF
     )
 }
 
+async fn simulate_route(
+    State(state): State<AdminState>,
+    Form(form): Form<RouteMatchForm>,
+) -> Response {
+    render_html_result(
+        route_simulator::render_simulation(&state.runtime.config(), form),
+        "route simulation",
+    )
+}
+
 async fn upstream_health_fragment(State(state): State<AdminState>) -> Response {
     let snapshot = state.runtime.snapshot();
     render_template(
@@ -228,12 +242,7 @@ fn render_html_result(result: askama::Result<String>, label: &str) -> Response {
 }
 
 fn route_views(mut routes: Vec<RouteConfig>) -> Vec<RouteView> {
-    routes.sort_by(|left, right| {
-        right
-            .priority
-            .cmp(&left.priority)
-            .then_with(|| right.path.len().cmp(&left.path.len()))
-    });
+    sort_routes(&mut routes);
 
     routes
         .into_iter()
@@ -527,6 +536,22 @@ mod tests {
                 .await
                 .expect("invalid route response");
             assert_eq!(invalid_candidate.status(), StatusCode::OK);
+
+            let simulation = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/admin/routes/simulate")
+                        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                        .body(Body::from(
+                            "host=api.test%3A8443&path=%2Fapi%2Fusers&method=POST",
+                        ))
+                        .expect("route simulation request"),
+                )
+                .await
+                .expect("route simulation response");
+            assert_eq!(simulation.status(), StatusCode::OK);
 
             let dashboard = app
                 .oneshot(
