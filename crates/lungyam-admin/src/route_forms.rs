@@ -4,8 +4,12 @@ use askama::Template;
 use lungyam_core::config::{Config, HeaderTransform, RateLimitConfig, RouteConfig, RoutePolicies};
 use serde::Deserialize;
 
+use crate::security;
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct RouteForm {
+    #[serde(default)]
+    pub csrf_token: String,
     pub name: String,
     #[serde(default)]
     pub host: String,
@@ -37,6 +41,8 @@ struct RouteFormTemplate {
     overview_active: bool,
     routes_active: bool,
     upstreams: Vec<String>,
+    csrf_token: String,
+    writes_enabled: bool,
 }
 
 #[derive(Template)]
@@ -52,19 +58,15 @@ pub(crate) fn render_new_route(config: &Config) -> askama::Result<String> {
         overview_active: false,
         routes_active: true,
         upstreams: config.upstreams.keys().cloned().collect(),
+        csrf_token: security::csrf_token().expose().to_owned(),
+        writes_enabled: security::writes_enabled(config),
     }
     .render()
 }
 
 pub(crate) fn render_validation(config: &Config, form: RouteForm) -> askama::Result<String> {
     let route_name = form.name.trim().to_owned();
-    let result = candidate_route(form).and_then(|candidate| {
-        let mut candidate_config = config.clone();
-        candidate_config.routes.push(candidate);
-        candidate_config
-            .validate()
-            .map_err(|error| error.to_string())
-    });
+    let result = candidate_config(config, form).map(|_| ());
 
     let (valid, message) = match result {
         Ok(()) => (
@@ -80,6 +82,15 @@ pub(crate) fn render_validation(config: &Config, form: RouteForm) -> askama::Res
         message,
     }
     .render()
+}
+
+pub(crate) fn candidate_config(config: &Config, form: RouteForm) -> Result<Config, String> {
+    let mut candidate_config = config.clone();
+    candidate_config.routes.push(candidate_route(form)?);
+    candidate_config
+        .validate()
+        .map_err(|error| error.to_string())?;
+    Ok(candidate_config)
 }
 
 fn candidate_route(form: RouteForm) -> Result<RouteConfig, String> {
@@ -209,6 +220,7 @@ mod tests {
         let html = render_validation(
             &test_config(),
             RouteForm {
+                csrf_token: String::new(),
                 name: "new-route".to_owned(),
                 host: "api.test".to_owned(),
                 path: "/new".to_owned(),
@@ -235,6 +247,7 @@ mod tests {
         let html = render_validation(
             &test_config(),
             RouteForm {
+                csrf_token: String::new(),
                 name: "bad-header".to_owned(),
                 host: String::new(),
                 path: "/".to_owned(),
@@ -261,6 +274,7 @@ mod tests {
         let html = render_validation(
             &test_config(),
             RouteForm {
+                csrf_token: String::new(),
                 name: "bad-header-line".to_owned(),
                 host: String::new(),
                 path: "/".to_owned(),
@@ -287,6 +301,7 @@ mod tests {
         let html = render_validation(
             &test_config(),
             RouteForm {
+                csrf_token: String::new(),
                 name: "bad-rate".to_owned(),
                 host: String::new(),
                 path: "/".to_owned(),

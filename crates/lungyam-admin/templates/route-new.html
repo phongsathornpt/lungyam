@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">Routes</p>
     <h1>New route</h1>
-    <p class="muted">Build a candidate route and validate it against the active Lungyam configuration before any persistence is introduced.</p>
+    <p class="muted">Validate a candidate route, then stage it as a pending revision for review. Staging never activates the proxy configuration.</p>
   </div>
   <a class="button button-secondary" href="/admin/routes">Back to routes</a>
 </header>
@@ -14,11 +14,12 @@
   <form
     class="route-form"
     method="post"
-    action="/admin/routes/validate"
-    hx-post="/admin/routes/validate"
+    action="/admin/routes/stage"
+    hx-post="/admin/routes/stage"
     hx-target="#route-validation"
     hx-swap="innerHTML"
   >
+    <input name="csrf_token" type="hidden" value="{{ csrf_token }}">
     <div class="form-grid">
       <label class="field">
         <span>Name</span>
@@ -74,13 +75,25 @@
     </div>
 
     <div class="form-actions">
-      <button class="button" type="submit">Validate route</button>
-      <span class="muted">Validation only — this does not write or activate configuration.</span>
+      <button
+        class="button button-secondary"
+        type="button"
+        hx-post="/admin/routes/validate"
+        hx-include="closest form"
+        hx-target="#route-validation"
+        hx-swap="innerHTML"
+      >Validate only</button>
+      {% if writes_enabled %}
+      <button class="button" type="submit">Stage pending revision</button>
+      <span class="muted">Staging persists a revision for review; it does not activate it.</span>
+      {% else %}
+      <span class="muted">Admin writes are disabled. Enable <code>admin.read_only: false</code> on a loopback admin listener to stage changes.</span>
+      {% endif %}
     </div>
   </form>
 
   <div id="route-validation" class="validation-slot" aria-live="polite">
-    <div class="validation-card validation-neutral">Submit the form to validate a candidate against the active config.</div>
+    <div class="validation-card validation-neutral">Validation only checks the candidate. Stage it for review only when writes are enabled.</div>
   </div>
 </section>
 {% endblock %}

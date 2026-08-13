@@ -1,0 +1,12 @@
+{% if success %}
+<div class="validation-card validation-success">
+  <strong>Pending revision created</strong>
+  <p>Route <code>{{ route_name }}</code> was staged as {{ revision }}. The active proxy configuration was not changed.</p>
+  <p><a href="/admin/revisions">Review the pending revision and diff</a> before activation.</p>
+</div>
+{% else %}
+<div class="validation-card validation-error">
+  <strong>Route was not staged</strong>
+  <p>{{ message }}</p>
+</div>
+{% endif %}
