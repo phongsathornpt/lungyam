@@ -1,6 +1,6 @@
 //! Lightweight server-rendered control plane for Lungyam.
 
-use std::{io, net::TcpListener as StdTcpListener, sync::Arc, thread::JoinHandle, time::Instant};
+use std::{io, net::TcpListener as StdTcpListener, sync::Arc, thread::JoinHandle};
 
 use askama::Template;
 use axum::{
@@ -10,63 +10,22 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::get,
 };
-use lungyam_core::config::Config;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ActiveConfigSummary {
-    pub proxy_listen: String,
-    pub admin_listen: String,
-    pub route_count: usize,
-    pub upstream_count: usize,
-    pub endpoint_count: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RuntimeSnapshot {
-    pub uptime_seconds: u64,
-    pub active_config: ActiveConfigSummary,
-}
-
-/// Read-only runtime state exposed to the admin control plane.
-#[derive(Debug)]
-pub struct RuntimeStatus {
-    started_at: Instant,
-    active_config: ActiveConfigSummary,
-}
-
-impl RuntimeStatus {
-    #[must_use]
-    pub fn from_config(config: &Config) -> Self {
-        let endpoint_count = config
-            .upstreams
-            .values()
-            .map(|upstream| upstream.endpoints.len())
-            .sum();
-
-        Self {
-            started_at: Instant::now(),
-            active_config: ActiveConfigSummary {
-                proxy_listen: config.server.listen.clone(),
-                admin_listen: config.admin.listen.clone(),
-                route_count: config.routes.len(),
-                upstream_count: config.upstreams.len(),
-                endpoint_count,
-            },
-        }
-    }
-
-    #[must_use]
-    pub fn snapshot(&self) -> RuntimeSnapshot {
-        RuntimeSnapshot {
-            uptime_seconds: self.started_at.elapsed().as_secs(),
-            active_config: self.active_config.clone(),
-        }
-    }
-}
+use lungyam_core::{
+    config::Config,
+    runtime::{EndpointHealth, RuntimeStatus},
+};
 
 #[derive(Clone)]
 struct AdminState {
     runtime: Arc<RuntimeStatus>,
+}
+
+#[derive(Clone, Debug)]
+struct EndpointHealthView {
+    upstream: String,
+    endpoint: String,
+    status: &'static str,
+    status_class: &'static str,
 }
 
 #[derive(Template)]
@@ -78,6 +37,7 @@ struct DashboardTemplate {
     upstream_count: usize,
     endpoint_count: usize,
     uptime: String,
+    endpoint_health: Vec<EndpointHealthView>,
 }
 
 /// Handle that keeps ownership of the admin server thread.
@@ -144,6 +104,7 @@ async fn dashboard(State(state): State<AdminState>) -> Response {
         upstream_count: active.upstream_count,
         endpoint_count: active.endpoint_count,
         uptime: format_uptime(snapshot.uptime_seconds),
+        endpoint_health: health_views(snapshot.endpoint_health),
     };
 
     match template.render() {
@@ -170,6 +131,26 @@ async fn stylesheet() -> impl IntoResponse {
     )
 }
 
+fn health_views(endpoints: Vec<EndpointHealth>) -> Vec<EndpointHealthView> {
+    endpoints
+        .into_iter()
+        .map(|endpoint| EndpointHealthView {
+            upstream: endpoint.upstream,
+            endpoint: endpoint.endpoint,
+            status: if endpoint.healthy {
+                "Healthy"
+            } else {
+                "Unhealthy"
+            },
+            status_class: if endpoint.healthy {
+                "health-healthy"
+            } else {
+                "health-unhealthy"
+            },
+        })
+        .collect()
+}
+
 fn format_uptime(seconds: u64) -> String {
     let hours = seconds / 3_600;
     let minutes = (seconds % 3_600) / 60;
@@ -193,28 +174,21 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
-    use lungyam_core::config::{
-        AdminConfig, Config, RouteConfig, RoutePolicies, ServerConfig, UpstreamConfig,
+    use lungyam_core::{
+        config::{
+            AdminConfig, Config, RouteConfig, RoutePolicies, ServerConfig, UpstreamConfig,
+        },
+        runtime::RuntimeStatus,
     };
     use tower::ServiceExt;
 
-    use super::{DashboardTemplate, RuntimeStatus, format_uptime, router_with_status};
+    use super::{DashboardTemplate, format_uptime, health_views, router_with_status};
 
     #[test]
-    fn runtime_status_captures_active_config_summary() {
-        let config = test_config();
-        let snapshot = RuntimeStatus::from_config(&config).snapshot();
-
-        assert_eq!(snapshot.active_config.proxy_listen, "0.0.0.0:8080");
-        assert_eq!(snapshot.active_config.admin_listen, "127.0.0.1:9090");
-        assert_eq!(snapshot.active_config.route_count, 1);
-        assert_eq!(snapshot.active_config.upstream_count, 1);
-        assert_eq!(snapshot.active_config.endpoint_count, 2);
-    }
-
-    #[test]
-    fn dashboard_template_renders_runtime_summary() {
-        let snapshot = RuntimeStatus::from_config(&test_config()).snapshot();
+    fn dashboard_template_renders_runtime_summary_and_health() {
+        let status = RuntimeStatus::from_config(&test_config());
+        status.set_endpoint_health("api", "127.0.0.1:3001", false);
+        let snapshot = status.snapshot();
         let active = snapshot.active_config;
         let template = DashboardTemplate {
             proxy_listen: active.proxy_listen,
@@ -223,6 +197,7 @@ mod tests {
             upstream_count: active.upstream_count,
             endpoint_count: active.endpoint_count,
             uptime: format_uptime(snapshot.uptime_seconds),
+            endpoint_health: health_views(snapshot.endpoint_health),
         };
         let html = template.render().expect("dashboard should render");
 
@@ -232,6 +207,8 @@ mod tests {
         assert!(html.contains(">1<"));
         assert!(html.contains(">2<"));
         assert!(html.contains("Uptime"));
+        assert!(html.contains("127.0.0.1:3001"));
+        assert!(html.contains("Unhealthy"));
     }
 
     #[test]
