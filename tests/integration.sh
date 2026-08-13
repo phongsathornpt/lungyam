@@ -18,7 +18,8 @@ proxy_pid=$!
 
 ready=false
 for _ in $(seq 1 80); do
-  if curl --silent --fail http://127.0.0.1:18080/health >/dev/null 2>&1; then
+  if curl --silent --fail http://127.0.0.1:18080/health >/dev/null 2>&1 \
+    && curl --silent --fail http://127.0.0.1:19090/admin/health >/dev/null 2>&1; then
     ready=true
     break
   fi
@@ -31,6 +32,28 @@ done
 
 if [[ "$ready" != "true" ]]; then
   echo "Lungyam did not become ready"
+  cat /tmp/lungyam-proxy.log
+  exit 1
+fi
+
+admin_health_visible=false
+for _ in $(seq 1 40); do
+  admin_body=$(curl --silent --fail http://127.0.0.1:19090/admin)
+  if grep -q '127.0.0.1:39999' <<<"$admin_body" \
+    && grep -q 'health-unhealthy">Unhealthy' <<<"$admin_body"; then
+    admin_health_visible=true
+    break
+  fi
+  if ! kill -0 "$proxy_pid" 2>/dev/null; then
+    cat /tmp/lungyam-proxy.log
+    exit 1
+  fi
+  sleep 0.25
+done
+
+if [[ "$admin_health_visible" != "true" ]]; then
+  echo "Admin UI did not surface unhealthy upstream status"
+  curl --silent http://127.0.0.1:19090/admin || true
   cat /tmp/lungyam-proxy.log
   exit 1
 fi
