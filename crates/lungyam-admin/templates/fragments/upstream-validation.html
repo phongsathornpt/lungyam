@@ -1,0 +1,12 @@
+{% if valid %}
+<div class="validation-card validation-success">
+  <strong>Upstream candidate is valid</strong>
+  <p><code>{{ upstream_name }}</code> passed the active Lungyam configuration validation rules.</p>
+  {% if restart_required %}<p><strong>Restart required:</strong> upstream topology and health-check service changes are not hot-reloadable yet.</p>{% endif %}
+</div>
+{% else %}
+<div class="validation-card validation-error">
+  <strong>Upstream candidate is invalid</strong>
+  <p>{{ message }}</p>
+</div>
+{% endif %}
