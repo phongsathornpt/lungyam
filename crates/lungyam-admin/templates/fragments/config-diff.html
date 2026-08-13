@@ -1,0 +1,28 @@
+{% if !valid %}
+<div class="validation-card validation-error">
+  <strong>Diff unavailable</strong>
+  <p>{{ message }}</p>
+</div>
+{% else %}
+<div class="validation-card {% if restart_required %}validation-error{% else %}validation-success{% endif %}">
+  <strong>{{ from_revision }} → {{ to_revision }}</strong>
+  <p>{{ message }}</p>
+  {% if empty %}
+  <p>No effective changes.</p>
+  {% else %}
+  <div class="policy-list panel-spaced">
+    {% if server_changed %}<span class="policy-badge">Server changed</span>{% endif %}
+    {% if admin_changed %}<span class="policy-badge">Admin changed</span>{% endif %}
+    {% if restart_required %}<span class="policy-badge">Restart required</span>{% else %}<span class="policy-badge">Route-level change</span>{% endif %}
+  </div>
+  <dl class="detail-grid panel-spaced">
+    <div><dt>Upstreams added</dt><dd>{{ upstreams_added }}</dd></div>
+    <div><dt>Upstreams removed</dt><dd>{{ upstreams_removed }}</dd></div>
+    <div><dt>Upstreams changed</dt><dd>{{ upstreams_changed }}</dd></div>
+    <div><dt>Routes added</dt><dd>{{ routes_added }}</dd></div>
+    <div><dt>Routes removed</dt><dd>{{ routes_removed }}</dd></div>
+    <div><dt>Routes changed</dt><dd>{{ routes_changed }}</dd></div>
+  </dl>
+  {% endif %}
+</div>
+{% endif %}
