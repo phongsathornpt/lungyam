@@ -15,6 +15,7 @@ use http::{HeaderName, HeaderValue};
 use lungyam_core::{
     PROJECT_NAME,
     config::{Config, HeaderTransform, RouteConfig},
+    routing::{route_matches, sort_routes},
     runtime::RuntimeStatus,
 };
 use pingora::{
@@ -78,12 +79,7 @@ impl Gateway {
     /// Creates a gateway and pre-orders routes by priority and specificity.
     #[must_use]
     pub fn new(mut config: Config, clusters: BTreeMap<String, UpstreamCluster>) -> Self {
-        config.routes.sort_by(|left, right| {
-            right
-                .priority
-                .cmp(&left.priority)
-                .then_with(|| right.path.len().cmp(&left.path.len()))
-        });
+        sort_routes(&mut config.routes);
 
         Self {
             config,
@@ -347,40 +343,6 @@ fn apply_response_headers(header: &mut ResponseHeader, transform: &HeaderTransfo
     }
 }
 
-fn route_matches(route: &RouteConfig, host: Option<&str>, path: &str, method: &str) -> bool {
-    host_matches(route.host.as_deref(), host)
-        && path_matches(&route.path, path)
-        && (route.methods.is_empty()
-            || route
-                .methods
-                .iter()
-                .any(|allowed| allowed.eq_ignore_ascii_case(method)))
-}
-
-fn host_matches(expected: Option<&str>, actual: Option<&str>) -> bool {
-    let Some(expected) = expected else {
-        return true;
-    };
-    let Some(actual) = actual else {
-        return false;
-    };
-
-    actual.eq_ignore_ascii_case(expected)
-        || actual
-            .strip_prefix(expected)
-            .is_some_and(|suffix| suffix.starts_with(':'))
-}
-
-fn path_matches(route_path: &str, actual: &str) -> bool {
-    if route_path == "/" || route_path == actual {
-        return true;
-    }
-
-    actual
-        .strip_prefix(route_path)
-        .is_some_and(|suffix| suffix.starts_with('/'))
-}
-
 fn build_upstream_clusters(
     config: &Config,
     runtime: &Arc<RuntimeStatus>,
@@ -441,32 +403,4 @@ pub fn run_with_status(config: Config, runtime: Arc<RuntimeStatus>) {
 #[must_use]
 pub fn runtime_banner() -> String {
     format!("{PROJECT_NAME} proxy")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{host_matches, path_matches};
-
-    #[test]
-    fn path_matching_respects_segment_boundaries() {
-        assert!(path_matches("/api", "/api"));
-        assert!(path_matches("/api", "/api/users"));
-        assert!(!path_matches("/api", "/apiv2"));
-    }
-
-    #[test]
-    fn host_matching_accepts_optional_port() {
-        assert!(host_matches(
-            Some("api.example.com"),
-            Some("api.example.com")
-        ));
-        assert!(host_matches(
-            Some("api.example.com"),
-            Some("api.example.com:8080")
-        ));
-        assert!(!host_matches(
-            Some("api.example.com"),
-            Some("other.example.com")
-        ));
-    }
 }
