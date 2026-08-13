@@ -169,15 +169,33 @@ fn render_error(status: StatusCode, message: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{
+        collections::BTreeMap,
+        fs,
+        path::PathBuf,
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
+    };
 
-    use lungyam_core::config::{AdminConfig, Config, ServerConfig, UpstreamConfig};
+    use axum::{Form, extract::State, http::StatusCode};
+    use lungyam_core::{
+        config::{AdminConfig, Config, ServerConfig, UpstreamConfig},
+        revision::FileRevisionStore,
+        revision_state::FileRevisionStateStore,
+        runtime::RuntimeStatus,
+        store::{ConfigStore, FileConfigStore},
+    };
 
-    use super::{StageUpstreamCreateForm, candidate_config};
+    use super::{StageUpstreamCreateForm, candidate_config, stage_create};
+    use crate::{AdminState, security};
+
+    static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
     #[test]
     fn candidate_create_rejects_duplicate_and_parses_values() {
-        let config = test_config();
+        let config = test_config(false);
         let duplicate = form("api");
         assert!(candidate_config(&config, &duplicate).is_err());
 
@@ -188,6 +206,104 @@ mod tests {
         assert_eq!(canary.read_timeout_ms, Some(10000));
         assert_eq!(canary.write_timeout_ms, Some(15000));
         assert_eq!(canary.health_check_interval_seconds, 7);
+    }
+
+    #[test]
+    fn handler_stages_pending_revision_without_replacing_active_config() {
+        let directory = test_directory();
+        fs::create_dir_all(&directory).expect("create test directory");
+        let config_path = directory.join("lungyam.yaml");
+        let config = test_config(false);
+        let active_store = FileConfigStore::new(&config_path);
+        active_store.save(&config).expect("save active config");
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+
+        runtime.block_on(async {
+            let state = AdminState {
+                runtime: Arc::new(RuntimeStatus::from_config(&config)),
+                config_path: Some(config_path.clone()),
+            };
+            let mut request = form("canary");
+            request.csrf_token = security::csrf_token().expose().to_owned();
+
+            let response = stage_create(State(state), Form(request)).await;
+            assert_eq!(response.status(), StatusCode::OK);
+
+            assert_eq!(
+                active_store.load().expect("reload active config"),
+                config,
+                "staging must not replace the active config file"
+            );
+
+            let revisions = FileRevisionStore::beside_config(&config_path);
+            let history = revisions.list().expect("revision history");
+            assert_eq!(history.len(), 1);
+            let snapshot = revisions
+                .load(history[0].revision)
+                .expect("load staged revision");
+            let canary = &snapshot.config.upstreams["canary"];
+            assert_eq!(canary.endpoints.len(), 2);
+            assert_eq!(canary.connect_timeout_ms, Some(2500));
+            assert_eq!(canary.health_check_interval_seconds, 7);
+
+            let state = FileRevisionStateStore::new(revisions.root())
+                .load()
+                .expect("revision state");
+            assert_eq!(state.active_revision, None);
+            assert_eq!(state.pending_revision, Some(history[0].revision));
+        });
+
+        fs::remove_dir_all(directory).expect("cleanup test directory");
+    }
+
+    #[test]
+    fn handler_rejects_read_only_and_invalid_csrf_before_staging() {
+        let directory = test_directory();
+        fs::create_dir_all(&directory).expect("create test directory");
+        let config_path = directory.join("lungyam.yaml");
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+
+        runtime.block_on(async {
+            let read_only = test_config(true);
+            FileConfigStore::new(&config_path)
+                .save(&read_only)
+                .expect("save active config");
+            let read_only_state = AdminState {
+                runtime: Arc::new(RuntimeStatus::from_config(&read_only)),
+                config_path: Some(config_path.clone()),
+            };
+            let mut request = form("canary");
+            request.csrf_token = security::csrf_token().expose().to_owned();
+            let response = stage_create(State(read_only_state), Form(request)).await;
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+            let writable = test_config(false);
+            let writable_state = AdminState {
+                runtime: Arc::new(RuntimeStatus::from_config(&writable)),
+                config_path: Some(config_path.clone()),
+            };
+            let mut request = form("canary");
+            request.csrf_token = "wrong-token".to_owned();
+            let response = stage_create(State(writable_state), Form(request)).await;
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+            assert!(
+                FileRevisionStore::beside_config(&config_path)
+                    .list()
+                    .expect("revision list")
+                    .is_empty()
+            );
+        });
+
+        fs::remove_dir_all(directory).expect("cleanup test directory");
     }
 
     fn form(upstream_name: &str) -> StageUpstreamCreateForm {
@@ -202,7 +318,15 @@ mod tests {
         }
     }
 
-    fn test_config() -> Config {
+    fn test_directory() -> PathBuf {
+        let sequence = TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "lungyam-admin-upstream-stage-{}-{sequence}",
+            std::process::id()
+        ))
+    }
+
+    fn test_config(read_only: bool) -> Config {
         let mut upstreams = BTreeMap::new();
         upstreams.insert(
             "api".to_owned(),
@@ -222,7 +346,7 @@ mod tests {
             admin: AdminConfig {
                 enabled: true,
                 listen: "127.0.0.1:9090".to_owned(),
-                read_only: false,
+                read_only,
             },
             upstreams,
             routes: Vec::new(),
