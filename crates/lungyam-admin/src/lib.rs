@@ -174,10 +174,7 @@ async fn new_route_page(State(state): State<AdminState>) -> Response {
     )
 }
 
-async fn validate_route(
-    State(state): State<AdminState>,
-    Form(form): Form<RouteForm>,
-) -> Response {
+async fn validate_route(State(state): State<AdminState>, Form(form): Form<RouteForm>) -> Response {
     render_html_result(
         route_forms::render_validation(&state.runtime.config(), form),
         "route validation",
@@ -390,6 +387,7 @@ mod tests {
         assert!(html.contains("/api"));
         assert!(html.contains("api"));
         assert!(html.contains("1 MiB"));
+        assert!(html.contains("/admin/routes/new"));
     }
 
     #[test]
