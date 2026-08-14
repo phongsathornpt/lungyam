@@ -4,6 +4,14 @@ on:
   push:
     tags:
       - "v*.*.*"
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "scripts/package-release.sh"
+      - "install.sh"
+      - "tests/install.sh"
+      - "Cargo.toml"
+      - "Cargo.lock"
   workflow_dispatch:
 
 concurrency:
@@ -16,8 +24,6 @@ permissions:
 jobs:
   prepare:
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
@@ -58,33 +64,6 @@ jobs:
           echo "version=${cargo_version}" >> "${GITHUB_OUTPUT}"
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
 
-      - name: Create or reuse draft release
-        if: github.event_name == 'push' && github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            is_draft="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')"
-            if [[ "${is_draft}" != "true" ]]; then
-              echo "release ${TAG} already exists and is published" >&2
-              exit 1
-            fi
-          else
-            gh release create "${TAG}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --verify-tag \
-              --draft \
-              --generate-notes \
-              --title "${TAG}"
-          fi
-
-          gh release upload "${TAG}" install.sh \
-            --repo "${GITHUB_REPOSITORY}" \
-            --clobber
-
   build:
     needs: prepare
     strategy:
@@ -99,8 +78,6 @@ jobs:
             asset: lungyam-linux-aarch64
 
     runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout
@@ -137,8 +114,6 @@ jobs:
           fi
 
       - name: Package release archive
-        env:
-          SOURCE_DATE_EPOCH: ${{ github.event.repository.pushed_at }}
         shell: bash
         run: |
           set -euo pipefail
@@ -148,22 +123,7 @@ jobs:
               "${{ matrix.asset }}" \
               dist
 
-      - name: Upload assets to draft release
-        if: github.event_name == 'push' && github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.prepare.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh release upload "${TAG}" \
-            "dist/${{ matrix.asset }}.tar.gz" \
-            "dist/${{ matrix.asset }}.tar.gz.sha256" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --clobber
-
-      - name: Upload dry-run artifacts
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}
@@ -182,7 +142,69 @@ jobs:
       contents: write
 
     steps:
-      - name: Publish draft release
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: lungyam-linux-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify packaged checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/lungyam-linux-x86_64.tar.gz
+          test -f dist/lungyam-linux-x86_64.tar.gz.sha256
+          test -f dist/lungyam-linux-aarch64.tar.gz
+          test -f dist/lungyam-linux-aarch64.tar.gz.sha256
+          (
+            cd dist
+            sha256sum -c lungyam-linux-x86_64.tar.gz.sha256
+            sha256sum -c lungyam-linux-aarch64.tar.gz.sha256
+          )
+
+      - name: Create or reuse draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            is_draft="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')"
+            if [[ "${is_draft}" != "true" ]]; then
+              echo "release ${TAG} already exists and is published" >&2
+              exit 1
+            fi
+          else
+            gh release create "${TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --verify-tag \
+              --draft \
+              --generate-notes \
+              --title "${TAG}"
+          fi
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG}" \
+            install.sh \
+            dist/lungyam-linux-x86_64.tar.gz \
+            dist/lungyam-linux-x86_64.tar.gz.sha256 \
+            dist/lungyam-linux-aarch64.tar.gz \
+            dist/lungyam-linux-aarch64.tar.gz.sha256 \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+
+      - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
