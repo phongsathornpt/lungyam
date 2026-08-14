@@ -1,0 +1,33 @@
+name: Export Cargo lockfile
+
+on:
+  push:
+    branches:
+      - test/release-pr-dry-run
+    paths:
+      - ".github/workflows/export-cargo-lock.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate lockfile
+        run: cargo generate-lockfile
+
+      - name: Export lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CARGO_LOCK_BASE64_BEGIN"
+          base64 -w0 Cargo.lock
+          echo
+          echo "CARGO_LOCK_BASE64_END"
