@@ -132,19 +132,11 @@ jobs:
             dist/${{ matrix.asset }}.tar.gz.sha256
           if-no-files-found: error
 
-  publish:
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs:
-      - prepare
-      - build
+  verify:
+    needs: build
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
@@ -152,7 +144,7 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Verify packaged checksums
+      - name: Verify assembled release bundle
         shell: bash
         run: |
           set -euo pipefail
@@ -165,6 +157,26 @@ jobs:
             sha256sum -c lungyam-linux-x86_64.tar.gz.sha256
             sha256sum -c lungyam-linux-aarch64.tar.gz.sha256
           )
+
+  publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs:
+      - prepare
+      - verify
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: lungyam-linux-*
+          path: dist
+          merge-multiple: true
 
       - name: Create or reuse draft release
         env:
