@@ -1,4 +1,4 @@
-name: Export Cargo lockfile
+name: Commit Cargo lockfile
 
 on:
   push:
@@ -8,14 +8,17 @@ on:
       - ".github/workflows/export-cargo-lock.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   lockfile:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: test/release-pr-dry-run
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -23,11 +26,13 @@ jobs:
       - name: Generate lockfile
         run: cargo generate-lockfile
 
-      - name: Export lockfile
+      - name: Commit lockfile and remove helper
         shell: bash
         run: |
           set -euo pipefail
-          echo "CARGO_LOCK_BASE64_BEGIN"
-          base64 -w0 Cargo.lock
-          echo
-          echo "CARGO_LOCK_BASE64_END"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git rm .github/workflows/export-cargo-lock.yml
+          git commit -m "build: commit Cargo lockfile"
+          git push origin HEAD:test/release-pr-dry-run
