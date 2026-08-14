@@ -31,6 +31,7 @@ The first native/container MVP is implemented. It currently supports HTTP upstre
 - Built-in `GET /health` endpoint
 - Docker and Docker Compose examples
 - CI covering formatting, build, unit tests, Clippy, and end-to-end proxy behavior
+- Checksum-verified Linux binary installer for release builds
 
 ## Architecture
 
@@ -76,11 +77,52 @@ crates/
 
 ## Requirements
 
-- Rust stable with Edition 2024 support
+- Rust stable with Edition 2024 support when building from source
 - `curl` and Python 3 only when running the repository integration test
 - Docker / Docker Compose are optional
 
-## Quick start
+## Install on Linux
+
+Release binaries are published for glibc-based Linux on `x86_64` and `aarch64`.
+The installer detects the host architecture, downloads the matching archive and SHA-256 file, verifies the checksum, checks `lungyam --version`, and only then replaces the installed binary.
+
+Install the latest release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/phongsathornpt/lungyam/main/install.sh | bash
+```
+
+Pin a release for reproducible deployments:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/phongsathornpt/lungyam/main/install.sh \
+  | VERSION=v0.1.0 bash
+```
+
+Choose an explicit install directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/phongsathornpt/lungyam/main/install.sh \
+  | VERSION=v0.1.0 INSTALL_DIR=/usr/local/bin bash
+```
+
+The installer never invokes `sudo` itself. When `INSTALL_DIR` is unset it uses `/usr/local/bin` for root and `$HOME/.local/bin` for other users. Alpine/musl is intentionally rejected until dedicated musl release artifacts are tested and published.
+
+If you prefer to inspect the installer before executing it:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/phongsathornpt/lungyam/main/install.sh
+less install.sh
+bash install.sh
+```
+
+Verify the installed binary:
+
+```bash
+lungyam --version
+```
+
+## Quick start from source
 
 ```bash
 git clone https://github.com/phongsathornpt/lungyam.git
@@ -179,13 +221,16 @@ cargo test --workspace --all-targets
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
-Run the end-to-end test:
+Run the end-to-end and installer tests:
 
 ```bash
 bash tests/integration.sh
+bash tests/install.sh
 ```
 
 The integration test starts a fixture backend and verifies method, path, query string, request body, request/response header transforms, request IDs, route matching, health-aware upstream failover, health endpoint behavior, and request-size rejection through a real Lungyam process.
+
+The installer test builds a hermetic fixture release archive, verifies packaging and SHA-256 validation, installs through the same Bash installer used by releases, and confirms that a corrupted archive is rejected.
 
 ## Docker Compose
 
@@ -205,6 +250,7 @@ The MVP intentionally keeps the data plane small:
 - Rate limiting is local to one Lungyam process and keyed by route, not client identity.
 - The request-size guard rejects oversized requests when `Content-Length` is present; a streaming byte counter is not implemented yet.
 - Failover currently targets connection-establishment failures; automatic retry on backend HTTP 5xx responses is not enabled.
+- Linux release binaries currently target glibc; musl/Alpine artifacts are not published yet.
 - Authentication, distributed rate limiting, caching, WAF rules, and WASM edge adapters are future work.
 
 ## License
