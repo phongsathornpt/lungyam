@@ -30,13 +30,13 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Build
-        run: cargo build --workspace --all-targets
+        run: cargo build --locked --workspace --all-targets
 
       - name: Test
-        run: cargo test --workspace --all-targets
+        run: cargo test --locked --workspace --all-targets
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Integration test
         run: bash tests/integration.sh
