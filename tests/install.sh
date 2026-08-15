@@ -70,4 +70,19 @@ if VERSION=v0.1.0 \
   exit 1
 fi
 
+missing_release_dir="${work_dir}/missing-release"
+mkdir -p "${missing_release_dir}"
+missing_release_error="${work_dir}/missing-release.err"
+if VERSION=latest \
+  INSTALL_DIR="${work_dir}/missing-install" \
+  LUNGYAM_DOWNLOAD_BASE="file://${missing_release_dir}" \
+  bash install.sh >/dev/null 2>"${missing_release_error}"; then
+  echo "installer unexpectedly succeeded without a latest release asset" >&2
+  exit 1
+fi
+
+grep -Fq \
+  "lungyam installer: could not download lungyam-linux-${asset_arch}.tar.gz; no published latest release may exist for phongsathornpt/lungyam" \
+  "${missing_release_error}"
+
 printf 'release packaging and installer test passed\n'
