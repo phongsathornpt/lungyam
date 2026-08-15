@@ -16,6 +16,21 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
 }
 
+download_file() {
+  local url="$1"
+  local destination="$2"
+  local description="$3"
+
+  if ! curl -fL --retry 3 --retry-delay 1 --connect-timeout 15 \
+    "${url}" \
+    -o "${destination}"; then
+    if [[ "${VERSION}" == "latest" || -z "${VERSION}" ]]; then
+      fail "could not download ${description}; no published latest release may exist for ${REPOSITORY}"
+    fi
+    fail "could not download ${description} for ${VERSION} from ${REPOSITORY}"
+  fi
+}
+
 for command_name in curl tar sha256sum install mv uname grep id mktemp; do
   require_command "${command_name}"
 done
@@ -80,12 +95,14 @@ cleanup() {
 trap cleanup EXIT
 
 printf 'Downloading %s\n' "${asset}"
-curl -fL --retry 3 --retry-delay 1 --connect-timeout 15 \
+download_file \
   "${base_url}/${asset}" \
-  -o "${work_dir}/${asset}"
-curl -fL --retry 3 --retry-delay 1 --connect-timeout 15 \
+  "${work_dir}/${asset}" \
+  "${asset}"
+download_file \
   "${base_url}/${checksum_asset}" \
-  -o "${work_dir}/${checksum_asset}"
+  "${work_dir}/${checksum_asset}" \
+  "${checksum_asset}"
 
 (
   cd "${work_dir}"
